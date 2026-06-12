@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DocMind AI — Document Q&A</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
+    .drop-zone.drag-over { border-color: #6366f1; background: #eef2ff; }
+    .chat-area { scroll-behavior: smooth; }
+    .source-body { display: none; }
+    .source-body.open { display: block; }
+    .typing-dot { animation: blink 1.2s infinite; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink { 0%,80%,100%{opacity:0} 40%{opacity:1} }
+    .doc-card { transition: all 0.15s ease; }
+    .doc-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-50 h-screen flex flex-col overflow-hidden">
+
+  <!-- Top bar -->
+  <header class="bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-3 flex items-center gap-3 shadow-lg z-10 flex-shrink-0">
+    <div class="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+    </div>
+    <div>
+      <h1 class="text-lg font-bold leading-none">DocMind AI</h1>
+      <p class="text-indigo-200 text-xs">RAG-powered Document Intelligence</p>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <span id="status-badge" class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-medium">
+        Loading…
+      </span>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- LEFT PANEL -->
+    <aside class="w-80 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 overflow-hidden">
+      <div class="p-4 border-b border-slate-100">
+        <h2 class="text-sm font-semibold text-slate-700 mb-3">Upload Document</h2>
+
+        <!-- Drop zone -->
+        <div id="drop-zone"
+          class="drop-zone border-2 border-dashed border-slate-300 rounded-xl p-5 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition-all"
+          onclick="document.getElementById('file-input').click()">
+          <div class="w-10 h-10 bg-indigo-100 rounded-lg mx-auto mb-2 flex items-center justify-center">
+            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+          </div>
+          <p class="text-sm text-slate-600 font-medium">Drop PDF or TXT here</p>
+          <p class="text-xs text-slate-400 mt-1">or click to browse · max 10 MB</p>
+          <input id="file-input" type="file" accept=".pdf,.txt" class="hidden" onchange="handleFileSelect(event)" />
+        </div>
+
+        <!-- Upload progress -->
+        <div id="upload-status" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
+      </div>
+
+      <!-- Document list -->
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-700">Documents</h2>
+          <span id="doc-count" class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+        </div>
+
+        <!-- Filter toggle -->
+        <div id="filter-bar" class="hidden mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
+          <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M3 3a1 1 0 000 2h11a1 1 0 100-2H3zm0 4a1 1 0 000 2h7a1 1 0 100-2H3zm0 4a1 1 0 100 2h4a1 1 0 100-2H3z"/>
+          </svg>
+          <span>Filtering by: <strong id="filter-name"></strong></span>
+          <button onclick="clearFilter()" class="ml-auto text-amber-500 hover:text-amber-700">✕</button>
+        </div>
+
+        <div id="doc-list" class="space-y-2">
+          <p class="text-xs text-slate-400 text-center py-4">Loading documents…</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT PANEL — Chat -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-slate-50">
+
+      <!-- Chat header -->
+      <div class="bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 flex-shrink-0">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold">AI</div>
+        <div>
+          <p class="text-sm font-semibold text-slate-800">DocMind Assistant</p>
+          <p class="text-xs text-slate-400">Powered by Claude · Answers only from your documents</p>
+        </div>
+        <div id="active-filter" class="ml-auto hidden">
+          <span class="bg-indigo-100 text-indigo-700 text-xs px-3 py-1 rounded-full font-medium" id="active-filter-label"></span>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div id="chat-area" class="chat-area flex-1 overflow-y-auto p-6 space-y-4">
+        <!-- Welcome message -->
+        <div class="flex gap-3">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5">AI</div>
+          <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-slate-100 max-w-lg">
+            <p class="text-sm text-slate-700">Hello! I'm DocMind AI. I can answer questions using content from your uploaded documents.</p>
+            <p class="text-sm text-slate-700 mt-2">A sample HR policy document (<strong>company_policy.txt</strong>) has been pre-loaded. Try asking:</p>
+            <ul class="mt-2 space-y-1">
+              <li><button onclick="askSample(this)" class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline text-left">→ How many vacation days do new employees get?</button></li>
+              <li><button onclick="askSample(this)" class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline text-left">→ What is the parental leave policy?</button></li>
+              <li><button onclick="askSample(this)" class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline text-left">→ What health insurance plans are available?</button></li>
+              <li><button onclick="askSample(this)" class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline text-left">→ What is the remote work policy?</button></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input area -->
+      <div class="bg-white border-t border-slate-200 px-6 py-4 flex-shrink-0">
+        <div class="flex gap-3 max-w-3xl mx-auto">
+          <input
+            id="question-input"
+            type="text"
+            placeholder="Ask a question about your documents…"
+            class="flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendQuestion();}"
+          />
+          <button
+            id="send-btn"
+            onclick="sendQuestion()"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            </svg>
+            Ask
+          </button>
+        </div>
+        <p class="text-center text-xs text-slate-400 mt-2">Answers are grounded in uploaded documents only · No hallucination</p>
+      </div>
+    </main>
+  </div>
+
+<script>
+let activeDocId = null;
+let activeDocName = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+window.addEventListener('load', async () => {
+  await loadDocuments();
+  await checkHealth();
+  setupDragDrop();
+});
+
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    const badge = document.getElementById('status-badge');
+    if (d.status === 'ok') {
+      badge.textContent = `${d.documents_indexed} doc${d.documents_indexed !== 1 ? 's' : ''} · ${d.vectors_in_index} chunks`;
+      badge.className = 'bg-white/20 text-white text-xs px-3 py-1 rounded-full font-medium';
+    }
+  } catch(e) {}
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+async function loadDocuments() {
+  const r = await fetch('/documents');
+  const d = await r.json();
+  const list = document.getElementById('doc-list');
+  const count = document.getElementById('doc-count');
+  count.textContent = d.total;
+
+  if (!d.documents.length) {
+    list.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">No documents yet. Upload a PDF or TXT file.</p>';
+    return;
+  }
+
+  list.innerHTML = d.documents.map(doc => `
+    <div class="doc-card bg-slate-50 border border-slate-200 rounded-xl p-3 cursor-pointer hover:border-indigo-300 ${activeDocId === doc.doc_id ? 'border-indigo-400 bg-indigo-50' : ''}"
+         onclick="filterByDoc('${doc.doc_id}', '${escapeJs(doc.filename)}')" id="doc-${doc.doc_id}">
+      <div class="flex items-start gap-2">
+        <div class="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center ${doc.file_type === 'pdf' ? 'bg-red-100' : 'bg-blue-100'}">
+          <span class="text-xs font-bold ${doc.file_type === 'pdf' ? 'text-red-600' : 'text-blue-600'}">${doc.file_type.toUpperCase()}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs font-semibold text-slate-700 truncate" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</p>
+          <p class="text-xs text-slate-400">${doc.chunk_count} chunks · ${formatSize(doc.file_size)}</p>
+        </div>
+        <button onclick="event.stopPropagation(); deleteDoc('${doc.doc_id}', '${escapeJs(doc.filename)}')"
+          class="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0" title="Delete">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterByDoc(docId, filename) {
+  if (activeDocId === docId) { clearFilter(); return; }
+  activeDocId = docId;
+  activeDocName = filename;
+  document.getElementById('filter-bar').classList.remove('hidden');
+  document.getElementById('filter-name').textContent = filename;
+  document.getElementById('active-filter').classList.remove('hidden');
+  document.getElementById('active-filter-label').textContent = `Filtering: ${filename}`;
+  loadDocuments();
+}
+
+function clearFilter() {
+  activeDocId = null; activeDocName = null;
+  document.getElementById('filter-bar').classList.add('hidden');
+  document.getElementById('active-filter').classList.add('hidden');
+  loadDocuments();
+}
+
+async function deleteDoc(docId, filename) {
+  if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
+  const r = await fetch(`/documents/${docId}`, { method: 'DELETE' });
+  if (r.ok) {
+    if (activeDocId === docId) clearFilter();
+    await loadDocuments();
+    await checkHealth();
+    appendSystemMessage(`Document "${filename}" deleted.`);
+  }
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+function setupDragDrop() {
+  const zone = document.getElementById('drop-zone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  });
+}
+
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) uploadFile(file);
+  event.target.value = '';
+}
+
+async function uploadFile(file) {
+  const status = document.getElementById('upload-status');
+  const allowed = ['.pdf', '.txt'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowed.includes(ext)) {
+    showUploadStatus('error', `❌ Unsupported type "${ext}". Use PDF or TXT.`); return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showUploadStatus('error', '❌ File too large. Max 10 MB.'); return;
+  }
+
+  showUploadStatus('loading', `⏳ Processing "${file.name}"…`);
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const r = await fetch('/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (r.ok) {
+      showUploadStatus('success', `✅ "${d.filename}" indexed — ${d.chunk_count} chunks`);
+      await loadDocuments();
+      await checkHealth();
+    } else {
+      showUploadStatus('error', `❌ ${d.detail || 'Upload failed'}`);
+    }
+  } catch(e) {
+    showUploadStatus('error', '❌ Network error. Is the server running?');
+  }
+}
+
+function showUploadStatus(type, msg) {
+  const el = document.getElementById('upload-status');
+  el.classList.remove('hidden');
+  const classes = { loading: 'bg-blue-50 text-blue-700', success: 'bg-green-50 text-green-700', error: 'bg-red-50 text-red-700' };
+  el.className = `mt-3 p-3 rounded-lg text-sm ${classes[type]}`;
+  el.textContent = msg;
+  if (type !== 'loading') setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+function askSample(btn) {
+  const q = btn.textContent.replace(/^→\s*/, '').trim();
+  document.getElementById('question-input').value = q;
+  sendQuestion();
+}
+
+async function sendQuestion() {
+  const input = document.getElementById('question-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  input.value = '';
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+
+  appendUserMessage(question);
+  const thinkingId = appendThinking();
+
+  try {
+    const r = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, doc_id: activeDocId })
+    });
+    const d = await r.json();
+    removeThinking(thinkingId);
+
+    if (r.ok) {
+      appendAssistantMessage(d.answer, d.sources, d.doc_used);
+    } else {
+      appendAssistantMessage(`⚠️ ${d.detail || 'Error occurred'}`, [], null);
+    }
+  } catch(e) {
+    removeThinking(thinkingId);
+    appendAssistantMessage('⚠️ Could not reach the server. Make sure DocMind is running.', [], null);
+  }
+
+  btn.disabled = false;
+  input.focus();
+  await checkHealth();
+}
+
+function appendUserMessage(text) {
+  const chat = document.getElementById('chat-area');
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="flex gap-3 justify-end">
+      <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-lg shadow-sm">
+        <p class="text-sm">${escapeHtml(text)}</p>
+      </div>
+      <div class="w-7 h-7 rounded-full bg-slate-200 flex-shrink-0 flex items-center justify-center text-slate-600 text-xs font-bold mt-0.5">U</div>
+    </div>
+  `);
+  scrollBottom();
+}
+
+let thinkingCounter = 0;
+function appendThinking() {
+  const id = 'thinking-' + (++thinkingCounter);
+  const chat = document.getElementById('chat-area');
+  chat.insertAdjacentHTML('beforeend', `
+    <div id="${id}" class="flex gap-3">
+      <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5">AI</div>
+      <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-slate-100">
+        <div class="flex gap-1 items-center h-4">
+          <span class="typing-dot w-2 h-2 bg-indigo-400 rounded-full block"></span>
+          <span class="typing-dot w-2 h-2 bg-indigo-400 rounded-full block"></span>
+          <span class="typing-dot w-2 h-2 bg-indigo-400 rounded-full block"></span>
+          <span class="text-xs text-slate-400 ml-1">Analyzing documents…</span>
+        </div>
+      </div>
+    </div>
+  `);
+  scrollBottom();
+  return id;
+}
+
+function removeThinking(id) {
+  document.getElementById(id)?.remove();
+}
+
+let msgCounter = 0;
+function appendAssistantMessage(answer, sources, docUsed) {
+  const id = 'msg-' + (++msgCounter);
+  const hasSources = sources && sources.length > 0;
+  const docLabel = docUsed && docUsed !== 'unknown' && docUsed !== 'none'
+    ? `<span class="text-xs text-slate-400 mt-1 block">Source: ${escapeHtml(docUsed)}</span>`
+    : '';
+
+  const sourcesHtml = hasSources ? `
+    <div class="mt-3 border-t border-slate-100 pt-2">
+      <button onclick="toggleSources('${id}')"
+        class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-medium">
+        <svg id="${id}-arrow" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        View ${sources.length} source excerpt${sources.length > 1 ? 's' : ''}
+      </button>
+      <div id="${id}-sources" class="source-body mt-2 space-y-2">
+        ${sources.map((s, i) => `
+          <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-200">
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="text-xs font-semibold text-slate-500">Excerpt ${i+1}</span>
+              <span class="text-xs text-slate-400">· Page ${s.page_num}</span>
+              <span class="ml-auto text-xs font-mono text-indigo-500">${(s.relevance_score * 100).toFixed(0)}% match</span>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed line-clamp-4">${escapeHtml(s.chunk_text.trim())}</p>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  document.getElementById('chat-area').insertAdjacentHTML('beforeend', `
+    <div class="flex gap-3">
+      <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5">AI</div>
+      <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-slate-100 max-w-2xl">
+        <p class="text-sm text-slate-800 leading-relaxed whitespace-pre-line">${escapeHtml(answer)}</p>
+        ${docLabel}
+        ${sourcesHtml}
+      </div>
+    </div>
+  `);
+  scrollBottom();
+}
+
+function appendSystemMessage(text) {
+  document.getElementById('chat-area').insertAdjacentHTML('beforeend', `
+    <div class="flex justify-center">
+      <span class="text-xs text-slate-400 bg-slate-100 px-3 py-1 rounded-full">${escapeHtml(text)}</span>
+    </div>
+  `);
+  scrollBottom();
+}
+
+function toggleSources(id) {
+  const body = document.getElementById(id + '-sources');
+  const arrow = document.getElementById(id + '-arrow');
+  body.classList.toggle('open');
+  arrow.style.transform = body.classList.contains('open') ? 'rotate(90deg)' : '';
+}
+
+function scrollBottom() {
+  const el = document.getElementById('chat-area');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function escapeJs(s) {
+  return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+</script>
+</body>
+</html>
