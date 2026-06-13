@@ -6,7 +6,7 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-haiku-20240307"
+MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 512
 
 SYSTEM_PROMPT = """You are a document assistant. Answer questions ONLY using the provided document excerpts below.
