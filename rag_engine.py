@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -13,7 +14,6 @@ logger = logging.getLogger(__name__)
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
 TOP_K = 5
 
 _model: Optional[TextEmbedding] = None
@@ -83,16 +83,67 @@ def parse_txt(file_bytes: bytes) -> list[tuple[int, str]]:
     return [(1, text)]
 
 
+_SEPARATOR_LINE_RE = re.compile(r"^[━_\-=*~#—–]{3,}$")
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split on blank lines. Re-joining the result with "\n\n" reproduces the
+    original text exactly, which matters: chunks must stay a verbatim substring
+    of the source document for citation grounding to hold."""
+    return [p.strip() for p in re.split(r"\n[ \t]*\n", text) if p.strip()]
+
+
+def _is_heading_block(paragraph: str) -> bool:
+    """True for a decorative section-heading paragraph: one or more separator
+    lines (a run of box-drawing/dash characters) wrapping exactly one title
+    line, e.g. "━━━\nSECTION 3: HEALTH AND WELLNESS BENEFITS\n━━━"."""
+    lines = [l.strip() for l in paragraph.splitlines() if l.strip()]
+    if not lines:
+        return False
+    non_sep = [l for l in lines if not _SEPARATOR_LINE_RE.match(l)]
+    has_sep = any(_SEPARATOR_LINE_RE.match(l) for l in lines)
+    return has_sep and len(non_sep) == 1
+
+
 def _chunk_pages(pages: list[tuple[int, str]]) -> list[dict]:
+    """Pack paragraphs into ~CHUNK_SIZE chunks, never splitting a paragraph
+    mid-sentence and never leaving a section heading stranded without the body
+    text that follows it (a heading always starts a fresh chunk). Chunks stay
+    exact, contiguous slices of the source text -- paragraphs are only ever
+    joined with "\n\n", the same whitespace that separated them originally --
+    so citation grounding (chunk text verbatim in the source doc) still holds
+    for every chunk, not just the first one per section.
+    """
     chunks: list[dict] = []
     for page_num, page_text in pages:
-        start = 0
-        while start < len(page_text):
-            end = start + CHUNK_SIZE
-            text = page_text[start:end].strip()
-            if len(text) > 40:
-                chunks.append({"text": text, "page_num": page_num})
-            start += CHUNK_SIZE - CHUNK_OVERLAP
+        paragraphs = _split_paragraphs(page_text)
+
+        buffer: list[str] = []
+        buffer_len = 0
+
+        def flush():
+            nonlocal buffer, buffer_len
+            if buffer:
+                text = "\n\n".join(buffer).strip()
+                if len(text) > 40:
+                    chunks.append({"text": text, "page_num": page_num})
+            buffer = []
+            buffer_len = 0
+
+        for para in paragraphs:
+            if _is_heading_block(para):
+                flush()  # heading always opens a new chunk together with its body
+                buffer.append(para)
+                buffer_len = len(para)
+                continue
+
+            if buffer and buffer_len + len(para) + 2 > CHUNK_SIZE:
+                flush()
+
+            buffer.append(para)
+            buffer_len += len(para) + 2
+
+        flush()
     return chunks
 
 
