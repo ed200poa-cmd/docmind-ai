@@ -163,6 +163,7 @@ def search(question: str, doc_id: Optional[str] = None, top_k: int = TOP_K) -> l
             continue
 
         results.append({
+            "chunk_id": chunk["id"],
             "chunk_text": chunk["chunk_text"],
             "page_num": chunk["page_num"],
             "doc_id": chunk["doc_id"],

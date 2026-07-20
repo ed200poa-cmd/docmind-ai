@@ -27,7 +27,12 @@ def _build_context(chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def answer_question(question: str, chunks: list[dict], doc_name: Optional[str] = None) -> dict:
+def answer_question(
+    question: str,
+    chunks: list[dict],
+    doc_name: Optional[str] = None,
+    temperature: Optional[float] = None,
+) -> dict:
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
     if not chunks:
@@ -63,12 +68,15 @@ def answer_question(question: str, chunks: list[dict], doc_name: Optional[str] =
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
+        create_kwargs = dict(
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
         )
+        if temperature is not None:
+            create_kwargs["temperature"] = temperature
+        message = client.messages.create(**create_kwargs)
         answer = message.content[0].text.strip()
     except anthropic.AuthenticationError:
         answer = "Invalid API key. Please check your ANTHROPIC_API_KEY in .env."

@@ -1,0 +1,212 @@
+[
+  {
+    "id": "factual_01",
+    "question": "What are ACME's standard working hours?",
+    "expected_answer": "Monday through Friday, 9:00 AM to 5:00 PM local time.",
+    "expected_source_snippet": "Monday through Friday, 9:00 AM to 5:00 PM local time",
+    "category": "factual"
+  },
+  {
+    "id": "factual_02",
+    "question": "How far in advance must an employee notify their manager if they will be late or absent?",
+    "expected_answer": "At least one hour before their shift begins.",
+    "expected_source_snippet": "notify their manager at least one hour before their shift begins",
+    "category": "factual"
+  },
+  {
+    "id": "factual_03",
+    "question": "What core availability hours must remote employees maintain?",
+    "expected_answer": "10:00 AM to 3:00 PM in their local time zone.",
+    "expected_source_snippet": "10:00 AM to 3:00 PM in their local time zone",
+    "category": "factual"
+  },
+  {
+    "id": "factual_04",
+    "question": "How many vacation days per year do employees with 3-5 years of tenure accrue?",
+    "expected_answer": "15 days per year.",
+    "expected_source_snippet": "Years 3–5: 15 days per year",
+    "category": "factual"
+  },
+  {
+    "id": "factual_05",
+    "question": "How far in advance must a standard (non-peak) vacation request be submitted?",
+    "expected_answer": "At least two weeks in advance, through the HR portal.",
+    "expected_source_snippet": "at least two weeks in advance through the HR portal",
+    "category": "factual"
+  },
+  {
+    "id": "factual_06",
+    "question": "What is the maximum number of unused vacation days that can be carried over into the next year?",
+    "expected_answer": "5 days.",
+    "expected_source_snippet": "carried over up to a maximum of 5 days",
+    "category": "factual"
+  },
+  {
+    "id": "factual_07",
+    "question": "At how many hours worked per week do employees become eligible for health benefits?",
+    "expected_answer": "30 or more hours per week.",
+    "expected_source_snippet": "working 30 or more hours per week",
+    "category": "factual"
+  },
+  {
+    "id": "factual_08",
+    "question": "Which insurance carrier does ACME use for medical coverage?",
+    "expected_answer": "BlueCross BlueShield.",
+    "expected_source_snippet": "through BlueCross BlueShield",
+    "category": "factual"
+  },
+  {
+    "id": "factual_09",
+    "question": "How many free counseling sessions per year does the Employee Assistance Program provide?",
+    "expected_answer": "12 free counseling sessions per year.",
+    "expected_source_snippet": "12 free counseling sessions per year",
+    "category": "factual"
+  },
+  {
+    "id": "factual_10",
+    "question": "How much is the annual wellness stipend?",
+    "expected_answer": "$500 per year.",
+    "expected_source_snippet": "$500 annual wellness stipend",
+    "category": "factual"
+  },
+  {
+    "id": "factual_11",
+    "question": "What approval is required before accepting a gift worth more than $50 from a vendor?",
+    "expected_answer": "Approval from the Ethics Committee.",
+    "expected_source_snippet": "Approval from the Ethics Committee is required before accepting gifts valued over $50",
+    "category": "factual"
+  },
+  {
+    "id": "factual_12",
+    "question": "How many weeks of paid parental leave does ACME offer?",
+    "expected_answer": "16 weeks, fully paid.",
+    "expected_source_snippet": "16 weeks of fully paid parental leave",
+    "category": "factual"
+  },
+  {
+    "id": "factual_13",
+    "question": "How long must an employee have worked at ACME to qualify for parental leave?",
+    "expected_answer": "At least 12 months.",
+    "expected_source_snippet": "who have been with the company for at least 12 months",
+    "category": "factual"
+  },
+  {
+    "id": "factual_14",
+    "question": "What equipment does ACME provide to all full-time employees by default?",
+    "expected_answer": "A laptop computer, keyboard, mouse, and monitor.",
+    "expected_source_snippet": "a laptop computer, keyboard, mouse, and monitor",
+    "category": "factual"
+  },
+  {
+    "id": "factual_15",
+    "question": "Within how many business days must equipment be returned after an employee separates from the company?",
+    "expected_answer": "5 business days.",
+    "expected_source_snippet": "must be returned within 5 business days",
+    "category": "factual"
+  },
+  {
+    "id": "multi_chunk_01",
+    "question": "An employee has 4 years of tenure at ACME and just received an 'Exceeds Expectations' performance rating. How many vacation days do they accrue per year, and what merit increase range are they eligible for?",
+    "expected_answer": "15 vacation days per year (the Years 3–5 tier), and a merit increase of 4–8% plus a discretionary bonus.",
+    "expected_source_snippet": "increases of 4–8% plus a discretionary bonus",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_02",
+    "question": "Does ACME's parental leave policy apply equally to a remote employee who adopts a child, and what core hours would that employee normally need to maintain when not on leave?",
+    "expected_answer": "Yes — parental leave applies to all parents including adoption, regardless of gender or role; when not on leave, a remote employee must maintain core availability hours of 10:00 AM to 3:00 PM in their local time zone.",
+    "expected_source_snippet": "regardless of gender",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_03",
+    "question": "If an employee wants both a standing desk for ergonomics and help paying for a gym membership, which two different company processes would they need to use?",
+    "expected_answer": "A standing desk request goes through the IT portal, subject to manager approval and budget availability; a gym membership can be reimbursed through the $500 annual wellness stipend.",
+    "expected_source_snippet": "subject to manager approval and budget availability",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_04",
+    "question": "Name two different situations in the handbook where an employee's actions could lead to formal disciplinary consequences or require prior approval from a specific group — one about repeated lateness, and one about accepting a vendor gift.",
+    "expected_answer": "Repeated unexcused absences (more than 3 in a rolling 90-day period) can lead to disciplinary action up to termination; accepting a vendor gift valued over $50 requires prior approval from the Ethics Committee.",
+    "expected_source_snippet": "gifts valued over $50 from vendors or clients",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_05",
+    "question": "Both health benefits and parental leave have a minimum length-of-employment requirement before an employee qualifies. What are those two waiting periods?",
+    "expected_answer": "Health benefits become effective after 30 days of employment; parental leave requires at least 12 months of employment.",
+    "expected_source_snippet": "effective on the first day of the month following 30 days of employment",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_06",
+    "question": "How much advance notice does an employee need to give for a vacation request during the December holiday peak period, compared to notifying a manager about being late for a regular shift?",
+    "expected_answer": "Four weeks advance notice plus manager approval for vacation during the December 15–January 5 peak period, versus at least one hour's notice for being late to a regular shift.",
+    "expected_source_snippet": "require four weeks advance notice and manager approval",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_07",
+    "question": "If a new employee's laptop breaks during their first six months, what's the process to get it replaced, and are they eligible for a merit increase at that point?",
+    "expected_answer": "Replacement equipment requests go through the IT portal, subject to manager approval and budget; new employees are not eligible for merit increases in their first year of employment.",
+    "expected_source_snippet": "not eligible for merit increases in their first year of employment",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "multi_chunk_08",
+    "question": "If an employee wants confidential counseling support for a personal issue and separately needs to report a harassment concern, what are the two different contact channels described in the handbook?",
+    "expected_answer": "The EAP hotline (1-800-555-0199) for confidential counseling, and the HR hotline or the confidential reporting portal at hr.acme.internal for harassment concerns.",
+    "expected_source_snippet": "1-800-555-0199",
+    "category": "multi_chunk"
+  },
+  {
+    "id": "unanswerable_01",
+    "question": "What is ACME's 401(k) retirement plan matching contribution?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_02",
+    "question": "How many paid sick days do employees receive, separate from vacation days?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_03",
+    "question": "What is ACME's severance pay policy for employees who are laid off?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_04",
+    "question": "Does ACME offer tuition reimbursement for employees pursuing further education?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_05",
+    "question": "What is ACME's official dress code policy?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_06",
+    "question": "How many paid holidays does ACME observe each year, and which days are they?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  },
+  {
+    "id": "unanswerable_07",
+    "question": "Does ACME provide relocation assistance for employees who transfer to a different office?",
+    "expected_answer": null,
+    "expected_source_snippet": null,
+    "category": "unanswerable"
+  }
+]

@@ -20,6 +20,10 @@ audio_cache/
 # Model cache (downloaded automatically)
 .cache/
 
+# Eval results (may contain generated answers / API responses; keep the dir, not the runs)
+evals/results/*
+!evals/results/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db
