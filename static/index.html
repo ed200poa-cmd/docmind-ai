@@ -22,9 +22,16 @@
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 
     @media (max-width: 768px) {
-      #app-layout { flex-direction: column; }
-      #chat-panel { order: 1; width: 100%; flex: 1 1 60%; min-height: 0; }
-      #sidebar-panel { order: 2; width: 100%; min-width: 0; flex: 1 1 40%; min-height: 0; }
+      /* In-app webview browsers (e.g. LinkedIn) don't reliably forward touch
+         scroll to nested overflow-y-auto regions, so the whole page scrolls
+         naturally on mobile instead of each panel scrolling internally. */
+      body.h-screen { height: auto; }
+      body.overflow-hidden { overflow-y: auto; overflow-x: hidden; }
+      #app-layout { flex-direction: column; height: auto; overflow: visible; }
+      #chat-panel { order: 1; width: 100%; flex: none; overflow: visible; }
+      #chat-area { flex: none; overflow: visible; }
+      #sidebar-panel { order: 2; width: 100%; min-width: 0; flex: none; overflow: visible; }
+      #doc-list-panel { flex: none; overflow: visible; }
       #question-input { min-width: 0; }
     }
   </style>
@@ -78,7 +85,7 @@
       </div>
 
       <!-- Document list -->
-      <div class="flex-1 overflow-y-auto p-4">
+      <div id="doc-list-panel" class="flex-1 overflow-y-auto p-4">
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-sm font-semibold text-slate-700">Documents</h2>
           <span id="doc-count" class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
