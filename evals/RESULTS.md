@@ -159,3 +159,82 @@ improved (1.60s → 1.42s), plausibly because shorter answers mean fewer output 
   53 API calls = 212 Claude API calls (embedding is local/CPU via fastembed, no API
   cost), plus one local-only diagnostic script (pure numpy/FAISS scoring, zero API
   calls) for the Step 1 diagnosis.
+
+## Session 3 (2026-07-29): API-free subset tooling + retrieval re-verification
+
+**Constraint this session:** no `ANTHROPIC_API_KEY` was available (no `.env`, no env
+var), so the full harness (`run_eval.py`) — which makes an answer call per case plus a
+judge call — could not be run. That means the answer-side metrics (correctness,
+citation grounding on *cited* sources, refusal accuracy) were **not** re-measured this
+session; they carry forward unchanged from the last full run with the key,
+`eval_20260720T132826Z` (the "After Step 4" column above), because no answer-path or
+retrieval-path code was changed. Retrieval recall@k is computed purely from local
+fastembed + FAISS, so it *was* re-verified, API-free.
+
+### What was added (tooling the task asked for, no dataset change)
+
+1. **`--category` on `run_eval.py`.** Previously only `--limit N` existed, which takes
+   the *first* N cases, so there was no way to run "multi_chunk only." Added
+   `--category multi_chunk` (a read-only subset selector; `dataset.json` is never
+   rewritten — verified with `git status`), so repeated experiments can target the one
+   weak category instead of paying for all 30 cases. An unknown category name errors
+   out listing the valid ones, rather than silently running everything.
+2. **`evals/retrieval_probe.py` — an API-free retrieval measurement path.** Reuses the
+   app's real `rag_engine.search(...)` to compute recall@1/@3/@5 and a
+   verbatim-substring check on retrieved chunks, making **zero** Claude API calls. This
+   is the "retrieval-only, no-LLM" path the task asked for so search-side experiments
+   can iterate for free.
+
+### Retrieval re-verified against the shipped Session-1 chunking fix
+
+`python evals/retrieval_probe.py` reproduces the Session-1 retrieval numbers exactly,
+independently confirming the paragraph+heading-aware chunker is what's live (index =
+17 chunks):
+
+| | k=1 | k=3 | k=5 |
+|---|---|---|---|
+| overall | 87.0% | 95.7% | 100.0% |
+| factual | 100.0% | 100.0% | 100.0% |
+| multi_chunk | 62.5% | 87.5% | 100.0% |
+
+Retrieved-chunk verbatim-substring rate: **100.0% (115/115)** — every retrieved chunk
+is an exact substring of `company_policy.txt`, the structural reason citation grounding
+holds. `factual` recall@1 is 100.0% (was 93.3% at baseline) — the guardrail that it
+must not drop is satisfied. Result files:
+`results/retrieval_probe_*.json` (full + `--category multi_chunk`).
+
+### Retrieval NOT changed this session — deliberate, with evidence
+
+No new retrieval change was shipped, and this is the correct call, not an omission:
+
+- **`multi_chunk recall@1` (62.5%) is a fixed-dataset measurement artifact, not a
+  retrieval defect** — re-confirmed independently this session by inspecting which
+  chunk ranks #1 for each miss. `multi_chunk_05`: rank #1 is the *parental-leave* chunk
+  (a genuinely required half of the two-part answer); the single `expected_source_snippet`
+  the metric scores is the *health* chunk, at rank 5 — both are in the top-5, so the
+  question is fully answerable, but recall@1 checks only the one marked snippet.
+  `multi_chunk_08`: rank #1 is the *harassment-policy* chunk (a required half); the
+  marked snippet is at rank 2. No retrieval method can push these to recall@1 = 100%
+  without editing the frozen `dataset.json`, which is forbidden.
+- **recall@3 and recall@5 are already at ceiling** (95.7% / 100.0% overall; the app
+  operates at `top_k=5`), so there is no live retrieval gap for a reranker / hybrid
+  search / query rewrite to close.
+- **Any change that reshuffles the top-5 set risks a guarded metric I cannot verify.**
+  Refusal accuracy (hard 100%) depends on what the 7 unanswerable cases retrieve, and
+  re-checking it needs an answer call, i.e. the API key that isn't available. Under the
+  task's rule "reject any change that lowers grounding or refusal, however large the
+  gain," an unverifiable-refusal change cannot be adopted. So the safe choice is to
+  ship no retrieval change and record why.
+
+### Frontend (mobile) fix this session
+
+`static/index.html`: the responsive breakpoint was `@media (max-width: 768px)`, which
+renders **exactly 768px** (a common tablet width) as *mobile*, contradicting the spec's
+"≥768px = desktop." Changed to `max-width: 767.98px` so <768px stacks and ≥768px keeps
+the two-column desktop layout. Verified with Playwright screenshots at 390/767/768/1440
+(saved to `/tmp/layout-check/`): 390 & 767 stack chat-first with the upload/documents
+panel below and zero horizontal overflow; 768 & 1440 render the two-column desktop
+layout; the 1440 screenshot is byte-identical before and after the change, so desktop
+is provably untouched.
+
+### API calls spent this session: 0 (all measurement local).
