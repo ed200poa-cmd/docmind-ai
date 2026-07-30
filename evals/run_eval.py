@@ -36,6 +36,13 @@ DEMO_DOC_FILENAME = "company_policy.txt"
 
 sys.path.insert(0, str(APP_ROOT))  # so `import rag_engine`, `import claude_qa` resolve like the app does
 
+# Load ANTHROPIC_API_KEY from the app's .env (the same source main.py uses), so the eval
+# runs whether or not the key is exported in the current shell. Explicit path because the
+# key is read before run_eval() does its os.chdir(APP_ROOT). Real env vars still win —
+# load_dotenv does not override an already-set variable.
+from dotenv import load_dotenv
+load_dotenv(APP_ROOT / ".env")
+
 REFUSAL_PHRASE = "This information is not found in the uploaded documents."
 K_VALUES = (1, 3, 5)
 # NOTE: the newer model families available in this account (claude-sonnet-5,
@@ -67,8 +74,20 @@ Grading rules:
   or wrong condition, or is a refusal / "not found" response when the reference shows a real answer exists."""
 
 
-def load_dataset(limit: int | None):
+def load_dataset(limit: int | None, category: str | None = None):
+    # dataset.json is read-only here: this only *selects* a subset of the frozen
+    # cases for a run, it never rewrites the file. `category` restricts the run to
+    # one category (e.g. multi_chunk) so retrieval experiments can iterate on the
+    # relevant cases without paying for a full 30-case run.
     data = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
+    if category:
+        available = sorted({c["category"] for c in data})
+        if category not in available:
+            raise SystemExit(
+                f"ERROR: --category {category!r} not found in dataset. "
+                f"Available categories: {', '.join(available)}."
+            )
+        data = [c for c in data if c["category"] == category]
     if limit:
         data = data[:limit]
     return data
@@ -113,7 +132,7 @@ def percentile(values: list[float], pct: float) -> float:
     return s[idx]
 
 
-def run_eval(limit: int | None, no_judge: bool) -> dict:
+def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> dict:
     if not os.getenv("ANTHROPIC_API_KEY"):
         print(
             "ERROR: ANTHROPIC_API_KEY is not set. Export it (e.g. via the app's .env) before running the eval.",
@@ -139,7 +158,7 @@ def run_eval(limit: int | None, no_judge: bool) -> dict:
         sys.exit(1)
 
     doc_text = DOC_PATH.read_text(encoding="utf-8")
-    dataset = load_dataset(limit)
+    dataset = load_dataset(limit, category)
 
     judge_client = None if no_judge else anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -419,10 +438,13 @@ def write_markdown(path: Path, run_data: dict, timestamp: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Run the DocMind AI RAG evaluation harness.")
     parser.add_argument("--limit", type=int, default=None, help="Run only the first N cases in the dataset.")
+    parser.add_argument("--category", type=str, default=None,
+                        help="Run only cases in this category (e.g. multi_chunk). Selects a subset "
+                             "for cheaper iteration; dataset.json is never modified.")
     parser.add_argument("--no-judge", action="store_true", help="Skip LLM-as-judge correctness grading (retrieval + refusal metrics only).")
     args = parser.parse_args()
 
-    run_data = run_eval(limit=args.limit, no_judge=args.no_judge)
+    run_data = run_eval(limit=args.limit, no_judge=args.no_judge, category=args.category)
     print_summary(run_data["metrics"], run_data["api_calls"], args.no_judge)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -442,6 +464,7 @@ def main():
             "judge_temperature": None if args.no_judge else JUDGE_TEMPERATURE,
             "no_judge": args.no_judge,
             "limit": args.limit,
+            "category": args.category,
         },
         "api_calls": run_data["api_calls"],
         "metrics": run_data["metrics"],

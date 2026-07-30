@@ -21,7 +21,10 @@
     ::-webkit-scrollbar-track { background: #f1f5f9; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 
-    @media (max-width: 768px) {
+    /* Mobile stacks below 768px; 768px and up keeps the desktop two-column
+       layout, matching the spec's "≥768px = desktop" boundary (max-width:768px
+       would have made exactly 768px — a common tablet width — render mobile). */
+    @media (max-width: 767.98px) {
       /* In-app webview browsers (e.g. LinkedIn) don't reliably forward touch
          scroll to nested overflow-y-auto regions, so the whole page scrolls
          naturally on mobile instead of each panel scrolling internally. */
