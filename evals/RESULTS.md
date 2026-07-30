@@ -9,8 +9,8 @@ directly comparable.
 Result files referenced in the prose below, in Session-1 order:
 `eval_20260720T124830Z` (baseline) → `eval_20260720T132125Z` (after chunking) →
 `eval_20260720T132538Z` (after refusal prompt) → `eval_20260720T132826Z` (after
-conciseness prompt). The summary table below compares the original baseline against
-the latest full confirmation run.
+conciseness prompt). The summary table below compares the original baseline against the
+two latest full confirmation runs (2026-07-30), which agree on every case verdict.
 
 ## Before / after, every metric
 
@@ -30,29 +30,47 @@ the latest full confirmation run.
 | answer correct — multi_chunk (n=8) | 75.0% | 75.0% | 0 |
 | citation grounding (protected) | 100.0% | 100.0% | 0 (held) |
 | refusal accuracy (protected) | 100.0% (7/7) | 100.0% (7/7) | 0 (held) |
-| median latency | 1.72s | 1.02s | -0.70s |
-| p95 latency | 2.58s | 2.24s | -0.34s |
+| median latency | 1.72s | 1.15s / 1.13s | -0.57s / -0.59s |
+| p95 latency | 2.58s | 4.89s / 2.23s | not reproducible (see note) |
 | API calls per full run | 53 | 53 | 0 |
 
 **Provenance.** *Baseline* column: `evals/results/eval_20260720T124830Z.json`, measured
-by `evals/run_eval.py`, 2026-07-20. *After* column: `evals/results/eval_20260730T014202Z.json`,
-measured by `evals/run_eval.py` in a single full 30-case run, 2026-07-30 UTC (2026-07-29
-local). Every After value — retrieval recall@k *and* the answer-side metrics — comes from
-that one run, so the whole column is internally consistent (no mixing of tools or dates).
+by `evals/run_eval.py`, 2026-07-20. *After* column: two back-to-back full 30-case runs,
+`evals/results/eval_20260730T122037Z.json` and `evals/results/eval_20260730T122154Z.json`,
+measured by `evals/run_eval.py` on 2026-07-30 UTC. Every correctness, grounding, refusal,
+and recall@k value in the After column is **identical in both runs**, so a single figure is
+reported. Latency is the one exception — it is wall-clock, not a verdict, so both runs' values
+are shown (run 1 / run 2); see the p95 note under "What is still failing."
 
 **Protected metrics held.** Citation grounding (100.0%, 115 citations checked) and refusal
 accuracy (100.0%, 7/7, zero hallucinations) are identical in both columns — no change was
 reverted, because none broke either guardrail. The factual recall@1 guardrail also held: it
 rose 93.3% → 100.0%, it did not drop.
 
-**On the answer-correctness numbers.** The LLM judge (Claude, temperature > 0) is
-non-deterministic, so answer-correctness percentages carry a few points of run-to-run noise
-at n=23. This After run scored 91.3% correct / 8.7% partial / 0.0% incorrect; the Session-1
-runs on 2026-07-20 sampled as high as 95.7% correct on the *same code*. What is stable across
-every run is the direction (correct up from the 87.0% baseline, incorrect driven to 0.0%) and
-both protected metrics pinned at 100%. `multi_chunk` correctness (75.0% here) is the noisiest
-cell because n=8 — `multi_chunk_03` and `multi_chunk_07` are the cases that flip between
-"correct" and "partially_correct" from run to run.
+**Judge determinism.** The LLM judge runs at **temperature 0**
+(`JUDGE_TEMPERATURE = 0`, passed on every `judge_answer` call in `evals/run_eval.py`) against
+`claude-haiku-4-5-20251001`. It was already configured that way — an earlier revision of this
+document claimed the judge ran at temperature > 0 and attributed answer-correctness movement
+to judge sampling noise; that claim was wrong and has been removed. The judge prompt and the
+scoring rubric are unchanged.
+
+**Reproducibility check (2026-07-30).** Two full 30-case runs were executed back to back with
+no code change between them: `evals/results/eval_20260730T122037Z.json` and
+`evals/results/eval_20260730T122154Z.json`. **All 30 cases returned the same verdict in both
+runs**, and every aggregate matched exactly: 91.3% correct / 8.7% partially_correct / 0.0%
+incorrect (n=23), factual 100.0% (n=15), multi_chunk 75.0% (n=8), citation grounding 100.0%
+(115/115), refusal accuracy 100.0% (7/7, zero hallucinations), and identical recall@1/@3/@5.
+The two partially_correct cases were the same in both runs (`multi_chunk_03`,
+`multi_chunk_07`). So the answer-side numbers above are reproducible at the **verdict** level.
+They are not byte-reproducible: the generated answer text and the judge's free-text `reason`
+string differ slightly between runs, because temperature 0 constrains sampling but does not
+guarantee identical token sequences. Verdicts are what the metrics are computed from, and
+those held.
+
+Against the 87.0% baseline the direction is unchanged (correct up, incorrect driven to 0.0%)
+with both protected metrics pinned at 100%. `multi_chunk` correctness (75.0%) remains the
+smallest-n cell at n=8, so it is still the cell most sensitive to a single case moving — but
+it did not move across these two runs.
 
 **multi_chunk recall@1 is a metric artifact, not a retrieval defect.** `dataset.json` marks a
 single `expected_source_snippet` per case, but multi_chunk answers require two or more chunks;
@@ -166,11 +184,14 @@ improved (1.60s → 1.42s), plausibly because shorter answers mean fewer output 
   `multi_chunk_08` (62.5% overall on `multi_chunk`) — but the application always
   retrieves `top_k=5`, and recall@5 is 100%, so this has no effect on live answer
   quality today. It would only matter if `TOP_K` were ever lowered.
-- **p95 latency (2.34s) is still noisy** run to run — it moved 2.58s → 3.42s → 2.52s
-  → 2.34s across the four runs while median stayed flat or improved, consistent with
-  ordinary per-call API variance (a slow outlier call landing on a different case each
-  run) rather than anything caused by the changes. Worth re-checking on a larger run
-  if p95 matters operationally, since n=30 is a small sample for a tail statistic.
+- **p95 latency is still noisy** run to run and is the one metric the reproducibility
+  check did *not* reproduce — it moved 2.58s → 3.42s → 2.52s → 2.34s across the four
+  Session-1/2 runs, then 4.89s (run 1) → 2.23s (run 2) in the two 2026-07-30 runs, while
+  median stayed flat (1.15s / 1.13s). Run 1's 4.89s comes from a single slow outlier call
+  (`multi_chunk_02`, 4.89s; max 6.12s) landing on a different case than in run 2. This is
+  ordinary per-call API variance, not anything caused by the changes — the judge running
+  at temperature 0 constrains verdicts, not network timing. Worth re-checking on a larger
+  run if p95 matters operationally, since n=30 is a small sample for a tail statistic.
 
 ## Cost / latency impact
 
@@ -188,6 +209,8 @@ improved (1.60s → 1.42s), plausibly because shorter answers mean fewer output 
   53 API calls = 212 Claude API calls (embedding is local/CPU via fastembed, no API
   cost), plus one local-only diagnostic script (pure numpy/FAISS scoring, zero API
   calls) for the Step 1 diagnosis.
+- **Reproducibility check (2026-07-30):** 2 further full runs × 53 calls = 106 additional
+  Claude API calls, bringing the cumulative total for this exercise to 318.
 
 ## Session 3 (2026-07-29): API-free subset tooling + retrieval re-verification
 
