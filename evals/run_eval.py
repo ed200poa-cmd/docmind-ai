@@ -36,6 +36,13 @@ DEMO_DOC_FILENAME = "company_policy.txt"
 
 sys.path.insert(0, str(APP_ROOT))  # so `import rag_engine`, `import claude_qa` resolve like the app does
 
+# Load ANTHROPIC_API_KEY from the app's .env (the same source main.py uses), so the eval
+# runs whether or not the key is exported in the current shell. Explicit path because the
+# key is read before run_eval() does its os.chdir(APP_ROOT). Real env vars still win —
+# load_dotenv does not override an already-set variable.
+from dotenv import load_dotenv
+load_dotenv(APP_ROOT / ".env")
+
 REFUSAL_PHRASE = "This information is not found in the uploaded documents."
 K_VALUES = (1, 3, 5)
 # NOTE: the newer model families available in this account (claude-sonnet-5,

@@ -6,31 +6,60 @@ Three changes, applied one at a time, each measured against the same unmodified
 metric formula changed at any point in this process — every number below is
 directly comparable.
 
-Result files referenced below, in order: `eval_20260720T124830Z` (baseline) →
-`eval_20260720T132125Z` (after chunking) → `eval_20260720T132538Z` (after refusal
-prompt) → `eval_20260720T132826Z` (after conciseness prompt, current).
+Result files referenced in the prose below, in Session-1 order:
+`eval_20260720T124830Z` (baseline) → `eval_20260720T132125Z` (after chunking) →
+`eval_20260720T132538Z` (after refusal prompt) → `eval_20260720T132826Z` (after
+conciseness prompt). The summary table below compares the original baseline against
+the latest full confirmation run.
 
 ## Before / after, every metric
 
-| Metric | Baseline | After Step 2 (chunking) | After Step 3 (refusal) | After Step 4 (conciseness) | Δ total |
-|---|---|---|---|---|---|
-| recall@1 (overall) | 73.9% | 87.0% | 87.0% | 87.0% | **+13.1** |
-| recall@3 (overall) | 91.3% | 95.7% | 95.7% | 95.7% | **+4.4** |
-| recall@5 (overall) | 95.7% | 100.0% | 100.0% | 100.0% | **+4.3** |
-| recall@1 (multi_chunk) | 37.5% | 62.5% | 62.5% | 62.5% | **+25.0** |
-| recall@3 (multi_chunk) | 75.0% | 87.5% | 87.5% | 87.5% | **+12.5** |
-| recall@5 (multi_chunk) | 87.5% | 100.0% | 100.0% | 100.0% | **+12.5** |
-| answer correctness — correct | 87.0% | 91.3% | 95.7% | 95.7% | **+8.7** |
-| answer correctness — partially_correct | 8.7% | 8.7% | 4.3% | 4.3% | -4.4 |
-| answer correctness — incorrect | 4.3% | 0.0% | 0.0% | 0.0% | **-4.3** |
-| citation grounding (protected) | 100.0% | 100.0% | 100.0% | 100.0% | 0 (held) |
-| refusal accuracy (protected) | 100.0% | 100.0% | 100.0% | 100.0% | 0 (held) |
-| median latency | 1.72s | 1.60s | 1.60s | 1.42s | **-0.30s** |
-| p95 latency | 2.58s | 3.42s | 2.52s | 2.34s | -0.24s |
-| API calls per full run | 53 | 53 | 53 | 53 | 0 |
+| Metric | Baseline | After | Δ |
+|---|---|---|---|
+| recall@1 (overall) | 73.9% | 87.0% | **+13.1** |
+| recall@3 (overall) | 91.3% | 95.7% | **+4.4** |
+| recall@5 (overall) | 95.7% | 100.0% | **+4.3** |
+| recall@1 (factual, guardrail) | 93.3% | 100.0% | **+6.7** |
+| recall@1 (multi_chunk) | 37.5% | 62.5% | **+25.0** |
+| recall@3 (multi_chunk) | 75.0% | 87.5% | **+12.5** |
+| recall@5 (multi_chunk) | 87.5% | 100.0% | **+12.5** |
+| answer correctness — correct | 87.0% | 91.3% | **+4.3** |
+| answer correctness — partially_correct | 8.7% | 8.7% | 0 |
+| answer correctness — incorrect | 4.3% | 0.0% | **-4.3** |
+| answer correct — factual (n=15) | 93.3% | 100.0% | **+6.7** |
+| answer correct — multi_chunk (n=8) | 75.0% | 75.0% | 0 |
+| citation grounding (protected) | 100.0% | 100.0% | 0 (held) |
+| refusal accuracy (protected) | 100.0% (7/7) | 100.0% (7/7) | 0 (held) |
+| median latency | 1.72s | 1.02s | -0.70s |
+| p95 latency | 2.58s | 2.24s | -0.34s |
+| API calls per full run | 53 | 53 | 0 |
 
-Both protected metrics (citation grounding, refusal accuracy) stayed at 100% through
-every step — nothing was reverted, because nothing broke them.
+**Provenance.** *Baseline* column: `evals/results/eval_20260720T124830Z.json`, measured
+by `evals/run_eval.py`, 2026-07-20. *After* column: `evals/results/eval_20260730T014202Z.json`,
+measured by `evals/run_eval.py` in a single full 30-case run, 2026-07-30 UTC (2026-07-29
+local). Every After value — retrieval recall@k *and* the answer-side metrics — comes from
+that one run, so the whole column is internally consistent (no mixing of tools or dates).
+
+**Protected metrics held.** Citation grounding (100.0%, 115 citations checked) and refusal
+accuracy (100.0%, 7/7, zero hallucinations) are identical in both columns — no change was
+reverted, because none broke either guardrail. The factual recall@1 guardrail also held: it
+rose 93.3% → 100.0%, it did not drop.
+
+**On the answer-correctness numbers.** The LLM judge (Claude, temperature > 0) is
+non-deterministic, so answer-correctness percentages carry a few points of run-to-run noise
+at n=23. This After run scored 91.3% correct / 8.7% partial / 0.0% incorrect; the Session-1
+runs on 2026-07-20 sampled as high as 95.7% correct on the *same code*. What is stable across
+every run is the direction (correct up from the 87.0% baseline, incorrect driven to 0.0%) and
+both protected metrics pinned at 100%. `multi_chunk` correctness (75.0% here) is the noisiest
+cell because n=8 — `multi_chunk_03` and `multi_chunk_07` are the cases that flip between
+"correct" and "partially_correct" from run to run.
+
+**multi_chunk recall@1 is a metric artifact, not a retrieval defect.** `dataset.json` marks a
+single `expected_source_snippet` per case, but multi_chunk answers require two or more chunks;
+recall@1 is scored against that one marked snippet, so when the *other* equally-required chunk
+legitimately ranks first (e.g. `multi_chunk_05`, `multi_chunk_08`), recall@1 records a miss
+even though retrieval succeeded. **recall@5 is the operative number because the app retrieves
+`top_k=5`** — and it is 100.0% overall.
 
 ## Change 1: paragraph + heading-aware chunking
 
