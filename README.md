@@ -122,6 +122,40 @@ document auto-loads on startup, so the app is queryable immediately.
 Endpoints: `POST /upload`, `POST /ask`, `GET /documents`, `DELETE /documents/{doc_id}`,
 `GET /health`.
 
+## MCP server (optional)
+
+`mcp_server.py` publishes the same retrieval layer over the Model Context Protocol, so an
+MCP client — Claude Code, for instance — can search the indexed documents directly instead
+of going through the HTTP API. It is a separate entry point: the FastAPI app is untouched
+and none of its endpoints change.
+
+Three tools are exposed, plus a `docmind://documents` resource that summarises the
+collection:
+
+| Tool | What it does |
+|---|---|
+| `search_documents(question, doc_id?, top_k?)` | Semantic search over the FAISS index. Returns excerpts with filename, page, and relevance score so the client can cite what it used. |
+| `list_documents()` | Every indexed document with its id and chunk count. |
+| `get_document_info(doc_id)` | Metadata for a single document. |
+
+Two capabilities are deliberately withheld, and both omissions are the point rather than
+gaps to fill in later.
+
+**No delete tool.** `rag_engine.remove_document()` stays out of the tool surface. Whatever
+is on the other end of an MCP connection is a model deciding for itself which tools to
+invoke, and dropping a document from the index cannot be undone. A destructive action with
+no recovery path needs a person to approve it, so it stays in the HTTP API where a human is
+driving.
+
+**No answering tool.** `claude_qa.answer_question()` is not wrapped either. In the HTTP app
+the server has to call a model, because the caller is a browser. Over MCP the caller
+already is a model, so the server's useful contribution ends once it has handed back the
+right passages and their sources — anything further would be a second model paraphrasing
+the first one's context, at twice the cost.
+
+Setup, client registration, and the transport constraints that shaped the implementation
+are in [`README_MCP.md`](README_MCP.md).
+
 ## Running the evaluation
 
 ```bash
