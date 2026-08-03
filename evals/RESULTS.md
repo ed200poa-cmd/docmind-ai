@@ -97,10 +97,15 @@ top_k problem (the embedding still ranked the orphaned chunk above 7 of 13 other
 **Fix:** pack paragraphs (split on blank lines) into ~500-char chunks without ever
 splitting a paragraph mid-sentence, and always start a new chunk when a section
 heading is encountered, so the heading and the paragraph(s) immediately following it
-land in the same chunk. Chunks are still built by rejoining paragraphs with the exact
-same `"\n\n"` that originally separated them, so every chunk remains a verbatim,
-contiguous substring of the source document — this is why citation grounding did not
-just "happen to stay" at 100%, it's structurally guaranteed by how the chunker works.
+land in the same chunk. Chunks remain verbatim, contiguous substrings of the source
+document — this is why citation grounding did not just "happen to stay" at 100%, it's
+structurally guaranteed by how the chunker works.
+
+> **Amended 2026-08-03.** As originally written, this change rebuilt chunks by rejoining
+> stripped paragraphs with a literal `"\n\n"`, which only reproduces the source when the
+> source already uses exactly that separator — so the guarantee above held for this corpus
+> but not in general. Session 4 replaced the rejoin with offset slicing and produced
+> byte-identical output on this corpus. No number in this document changed.
 
 **Cases fixed:** `multi_chunk_05` (recall@5 False → True, judge incorrect → correct).
 `factual_03`, `multi_chunk_03`, `multi_chunk_07` moved from a recall@1 miss to a
@@ -290,3 +295,77 @@ layout; the 1440 screenshot is byte-identical before and after the change, so de
 is provably untouched.
 
 ### API calls spent this session: 0 (all measurement local).
+
+## Session 4 (2026-08-03): unit test suite, and a chunker defect it found
+
+A unit suite was added for the application code the eval numbers rest on
+(`tests/test_chunking.py`, `tests/test_document_store.py`, `tests/test_search.py`), running
+offline in CI on every push — no Anthropic API calls, no access to the real `docmind.db`, no
+embedding-model download.
+
+**The invariant test found a real defect.** `_split_paragraphs` stripped each paragraph and
+rejoined with a literal `"\n\n"`. That reproduces the source only when the source already
+separates paragraphs with exactly `"\n\n"`. For a doubled blank line, a blank line holding
+spaces or tabs, an indented paragraph, or a paragraph with trailing whitespace, the emitted
+chunk was **not** a verbatim substring of its source — breaking the structural guarantee that
+Change 1 above claims, in exactly the cases Change 1's prose did not consider.
+
+**Scope of the defect, measured rather than assumed.** `demo_docs/company_policy.txt` uses
+`"\n\n"` throughout, so it never triggered the bug: all 17 chunks passed the invariant before
+the fix. **No previously published number in this document was ever wrong.** The exposure was
+to arbitrary uploaded documents, where PDF text extraction routinely produces indented lines
+and trailing spaces.
+
+**Fix.** `rag_engine.py`: `_paragraph_spans()` returns `(start, end)` offsets into the page
+instead of stripped strings, and `_chunk_pages` emits each chunk as the single slice
+`page_text[first_start:last_end]`. A chunk is therefore a contiguous substring by
+construction. Paragraph boundaries, heading handling, the `CHUNK_SIZE` packing budget, and
+the 40-character minimum are all unchanged.
+
+**Byte-identity check before re-measuring.** The old and new chunkers were run against
+`company_policy.txt` side by side: both produce 17 chunks with identical SHA-256 over the
+concatenated chunk text (`fa40ab23f04e1044`). The demo document was then deleted and
+re-ingested through `rag_engine.process_document` — the live path, not a test harness — and
+the persisted chunks hashed to the same value. So the eval below measures the fixed chunker,
+and any metric movement would have been attributable to API variance, not to chunking.
+
+### Before / after the chunker fix, every metric
+
+Before = the two-run 2026-07-30 confirmation (the "After" column at the top of this
+document). After = `evals/results/eval_20260803T022554Z.json`, one full 30-case run.
+
+| Metric | Before | After (post-fix) | Δ |
+|---|---|---|---|
+| recall@1 (overall) | 87.0% | 87.0% | 0 |
+| recall@3 (overall) | 95.7% | 95.7% | 0 |
+| recall@5 (overall) | 100.0% | 100.0% | 0 |
+| recall@1 (factual, guardrail) | 100.0% | 100.0% | 0 (held) |
+| recall@1 (multi_chunk) | 62.5% | 62.5% | 0 |
+| recall@3 (multi_chunk) | 87.5% | 87.5% | 0 |
+| recall@5 (multi_chunk) | 100.0% | 100.0% | 0 |
+| answer correctness — correct | 91.3% | 91.3% | 0 |
+| answer correctness — partially_correct | 8.7% | 8.7% | 0 |
+| answer correctness — incorrect | 0.0% | 0.0% | 0 |
+| answer correct — factual (n=15) | 100.0% | 100.0% | 0 |
+| answer correct — multi_chunk (n=8) | 75.0% | 75.0% | 0 |
+| **citation grounding (protected)** | 100.0% (115/115) | **100.0% (115/115)** | 0 (held) |
+| **refusal accuracy (protected)** | 100.0% (7/7) | **100.0% (7/7)** | 0 (held) |
+| median latency | 1.15s / 1.13s | 1.03s | -0.12s |
+| p95 latency | 4.89s / 2.23s | 1.83s | within observed run-to-run spread |
+| API calls per full run | 53 | 53 | 0 |
+| indexed chunk count | 17 | 17 | 0 |
+
+**Protected metrics held.** Citation grounding 100.0% with all 115 citations verified as
+verbatim substrings, refusal accuracy 100.0% (7/7) with zero hallucinations. The two
+`partially_correct` cases are the same ones as in both 2026-07-30 runs (`multi_chunk_03`,
+`multi_chunk_07`), so this run agrees with them at the verdict level on all 30 cases. Latency
+is the only column that moved, and it moved in the good direction; it is wall-clock, not a
+verdict, and p95 has never been reproducible run to run (see "What is still failing").
+
+Retrieval was also re-verified API-free before the paid run
+(`evals/results/retrieval_probe_20260803T022409Z.json`): 87.0% / 95.7% / 100.0% overall and
+115/115 verbatim, matching Session 3 exactly.
+
+### Cumulative API cost
+
+53 calls this session (one full run), bringing the total for this exercise to 371.

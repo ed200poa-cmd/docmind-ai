@@ -207,14 +207,26 @@ Current coverage:
 - `tests/test_search.py` — index rebuild from persisted chunks, index size, `top_k`,
   `doc_id` filtering, ranking, removal, and empty-index behaviour.
 
-**One known defect is recorded as a strict `xfail`** in `test_chunking.py`, not hidden:
-`_split_paragraphs` strips each paragraph and rejoins with a literal `"\n\n"`, so a source
-whose paragraph separator is not exactly `"\n\n"` (a blank line containing spaces, a
-doubled blank line, an indented or trailing-space paragraph) produces a chunk that is *not*
-a verbatim substring of its source. The current demo corpus does not trigger it — all 17
-chunks pass the invariant, which is why the published 115/115 grounding figure stands — but
-an arbitrary uploaded PDF could. The marker is strict, so it will start failing the moment
-the chunker is fixed and the marker is stale.
+### A defect the suite found, and the fix
+
+Writing the invariant test surfaced a real bug. `_split_paragraphs` used to strip each
+paragraph and rejoin them with a literal `"\n\n"`, which reproduces the source only when
+the source already separates paragraphs with exactly that. Any other form — a blank line
+containing spaces or tabs, a doubled blank line, an indented or trailing-space paragraph —
+produced a chunk that was **not** a verbatim substring of its source, silently breaking the
+guarantee citation grounding rests on. The demo corpus never triggers it, which is why the
+published 115/115 figure was never wrong; an arbitrary uploaded PDF could.
+
+The fix tracks paragraph *offsets* into the page and emits each chunk as a single slice
+`page[first_start:last_end]`, so a chunk is a contiguous substring by construction rather
+than by reconstruction. Chunk boundaries and the packing budget are unchanged: on
+`demo_docs/company_policy.txt` the fixed chunker produces byte-identical output to the old
+one (17 chunks, same SHA-256), and a full 30-case eval re-run after the fix reproduced every
+metric exactly, both protected metrics included — citation grounding 100.0% (115/115) and
+refusal accuracy 100.0% (7/7). See `evals/RESULTS.md`, Session 4.
+
+`test_invariant_holds_for_every_separator_form` covers nine separator forms and is the
+regression test for this.
 
 Still to come:
 

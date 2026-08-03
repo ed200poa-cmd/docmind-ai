@@ -86,11 +86,44 @@ def parse_txt(file_bytes: bytes) -> list[tuple[int, str]]:
 _SEPARATOR_LINE_RE = re.compile(r"^[━_\-=*~#—–]{3,}$")
 
 
+_BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """Split on blank lines, returning (start, end) offsets into `text`.
+
+    Offsets rather than strings, because a chunk is later emitted as the single
+    slice text[first_start:last_end]. Slicing is what makes a chunk a verbatim
+    contiguous substring of its source by construction, for every separator
+    form the source happens to use -- a doubled blank line, a blank line holding
+    spaces, an indented or trailing-space paragraph. Rebuilding chunks by
+    joining stripped paragraphs with a literal "\n\n" only reproduced the source
+    when the source already used exactly that separator.
+
+    Each span is trimmed of surrounding whitespace, so it starts and ends on a
+    non-space character, and empty spans are dropped.
+    """
+    bounds: list[tuple[int, int]] = []
+    pos = 0
+    for match in _BLANK_LINE_RE.finditer(text):
+        bounds.append((pos, match.start()))
+        pos = match.end()
+    bounds.append((pos, len(text)))
+
+    spans: list[tuple[int, int]] = []
+    for start, end in bounds:
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if start < end:
+            spans.append((start, end))
+    return spans
+
+
 def _split_paragraphs(text: str) -> list[str]:
-    """Split on blank lines. Re-joining the result with "\n\n" reproduces the
-    original text exactly, which matters: chunks must stay a verbatim substring
-    of the source document for citation grounding to hold."""
-    return [p.strip() for p in re.split(r"\n[ \t]*\n", text) if p.strip()]
+    """The paragraphs of `text`, each an exact substring of it."""
+    return [text[start:end] for start, end in _paragraph_spans(text)]
 
 
 def _is_heading_block(paragraph: str) -> bool:
@@ -108,40 +141,45 @@ def _is_heading_block(paragraph: str) -> bool:
 def _chunk_pages(pages: list[tuple[int, str]]) -> list[dict]:
     """Pack paragraphs into ~CHUNK_SIZE chunks, never splitting a paragraph
     mid-sentence and never leaving a section heading stranded without the body
-    text that follows it (a heading always starts a fresh chunk). Chunks stay
-    exact, contiguous slices of the source text -- paragraphs are only ever
-    joined with "\n\n", the same whitespace that separated them originally --
-    so citation grounding (chunk text verbatim in the source doc) still holds
-    for every chunk, not just the first one per section.
+    text that follows it (a heading always starts a fresh chunk).
+
+    A chunk is emitted as a single slice of its source page, spanning from the
+    start of its first paragraph to the end of its last. So every chunk is a
+    verbatim, contiguous substring of the source by construction -- citation
+    grounding is structurally guaranteed rather than dependent on the source
+    separating its paragraphs with exactly "\n\n".
     """
     chunks: list[dict] = []
     for page_num, page_text in pages:
-        paragraphs = _split_paragraphs(page_text)
+        spans = _paragraph_spans(page_text)
 
-        buffer: list[str] = []
+        buffer: list[tuple[int, int]] = []
         buffer_len = 0
 
         def flush():
             nonlocal buffer, buffer_len
             if buffer:
-                text = "\n\n".join(buffer).strip()
+                text = page_text[buffer[0][0]:buffer[-1][1]]
                 if len(text) > 40:
                     chunks.append({"text": text, "page_num": page_num})
             buffer = []
             buffer_len = 0
 
-        for para in paragraphs:
-            if _is_heading_block(para):
+        for span in spans:
+            para_len = span[1] - span[0]
+            if _is_heading_block(page_text[span[0]:span[1]]):
                 flush()  # heading always opens a new chunk together with its body
-                buffer.append(para)
-                buffer_len = len(para)
+                buffer.append(span)
+                buffer_len = para_len
                 continue
 
-            if buffer and buffer_len + len(para) + 2 > CHUNK_SIZE:
+            # +2 for the blank line that will separate this paragraph from the
+            # previous one; the packing budget is unchanged from the original.
+            if buffer and buffer_len + para_len + 2 > CHUNK_SIZE:
                 flush()
 
-            buffer.append(para)
-            buffer_len += len(para) + 2
+            buffer.append(span)
+            buffer_len += para_len + 2
 
         flush()
     return chunks

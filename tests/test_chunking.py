@@ -88,30 +88,59 @@ def test_demo_corpus_chunks_are_all_verbatim_substrings(demo_policy_text):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN DEFECT: _split_paragraphs strips each paragraph and rejoins with a "
-        "literal '\\n\\n', so any source whose paragraph separator is not exactly "
-        "'\\n\\n' -- a blank line containing spaces, a triple newline, an indented "
-        "or trailing-space paragraph -- yields a chunk that is NOT a substring of "
-        "the source. Not triggered by the current demo corpus. Fix separately; do "
-        "not delete this marker without fixing the chunker."
-    ),
-)
 @pytest.mark.parametrize(
-    "page_text",
+    "label, page_text",
     [
-        _para("a", 60) + "\n\n\n" + _para("b", 60),      # blank line, doubled
-        _para("a", 60) + "   \n\n" + _para("b", 60),     # trailing spaces
-        _para("a", 60) + "\n   \n" + _para("b", 60),     # blank line with spaces
-        _para("a", 60) + "\n\n    " + _para("b", 60),    # indented paragraph
+        ("doubled blank line", _para("a", 60) + "\n\n\n" + _para("b", 60)),
+        ("trailing spaces", _para("a", 60) + "   \n\n" + _para("b", 60)),
+        ("blank line with spaces", _para("a", 60) + "\n   \n" + _para("b", 60)),
+        ("indented paragraph", _para("a", 60) + "\n\n    " + _para("b", 60)),
+        ("tabs in blank line", _para("a", 60) + "\n\t\n" + _para("b", 60)),
+        ("trailing tab", _para("a", 60) + "\t\n\n" + _para("b", 60)),
+        ("leading blank lines", "\n\n  " + _para("a", 60) + "\n\n\n" + _para("b", 60)),
+        ("trailing blank lines", _para("a", 60) + "\n\n\n" + _para("b", 60) + "  \n\n"),
+        ("mixed separators", "\n".join([
+            _para("a", 60), "", _para("b", 60), "   ", _para("c", 60), "", "",
+            _para("d", 60),
+        ])),
     ],
 )
-def test_invariant_holds_for_whitespace_variant_separators(page_text):
+def test_invariant_holds_for_every_separator_form(label, page_text):
+    """The invariant must not depend on how the source separates paragraphs.
+
+    Regression test for the defect this replaced: the chunker used to strip each
+    paragraph and rejoin with a literal "\\n\\n", which reproduced the source
+    only when the source already used exactly that separator. Chunks are now
+    emitted as slices, so every case below is a substring by construction.
+    """
     chunks = _chunk_pages([(1, page_text)])
+    assert chunks, f"[{label}] fixture produced no chunks"
     for chunk in chunks:
-        assert chunk["text"] in page_text
+        offset = page_text.find(chunk["text"])
+        assert offset != -1, f"[{label}] chunk not verbatim: {chunk['text'][:80]!r}"
+        assert page_text[offset:offset + len(chunk["text"])] == chunk["text"]
+
+
+def test_chunk_text_never_starts_or_ends_with_whitespace():
+    pages = [
+        (1, "\n\n  " + _para("a", 60) + "\n   \n" + _para("b", 60) + "\t\n\n"),
+        (2, SECTIONED_PAGE),
+    ]
+    for chunk in _chunk_pages(pages):
+        assert chunk["text"] == chunk["text"].strip()
+
+
+def test_separator_whitespace_is_preserved_inside_a_chunk():
+    """A chunk is a slice, so it carries the source's own separators.
+
+    This is the mechanism behind the fix: the chunker no longer normalises
+    "\\n\\n\\n" down to "\\n\\n", which is precisely what used to break the
+    substring guarantee.
+    """
+    page_text = _para("a", 60) + "\n\n\n" + _para("b", 60)
+    chunk = _chunk_pages([(1, page_text)])[0]
+    assert "\n\n\n" in chunk["text"]
+    assert chunk["text"] == page_text
 
 
 # ---------------------------------------------------------------------------
