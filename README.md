@@ -182,16 +182,42 @@ See [`evals/README.md`](evals/README.md) for metric definitions and how to inter
 
 ## Testing
 
-Not yet implemented. The eval harness measures model and retrieval behaviour, which is a
-different concern from unit and integration testing of the application code.
+The eval harness measures model and retrieval behaviour. The test suite is a separate
+concern: it covers the application code that the eval numbers depend on.
 
-Planned coverage:
+```bash
+pip install -r requirements-dev.txt
+.venv/bin/python -m pytest                    # whole suite, ~0.6s
+.venv/bin/python -m pytest tests/test_chunking.py -v
+```
 
-- `rag_engine._chunk_pages` — paragraph packing, heading boundaries, and the invariant that
-  every chunk is a verbatim substring of its source
-- `document_store` — schema init, chunk round-trip, cascade delete
-- `rag_engine.search` — index rebuild from persisted chunks, `top_k` and `doc_id` filtering
+The suite runs fully offline. No test calls the Anthropic API, no test opens the real
+`docmind.db` (every database fixture uses a temporary file), and the search tests use a
+deterministic bag-of-words embedder instead of downloading model weights — so retrieval
+assertions test the retrieval code rather than the semantics of MiniLM. CI on push and pull
+request runs it with no secrets configured, which is what keeps that property honest.
+
+Current coverage:
+
+- `tests/test_chunking.py` — the grounding invariant asserted directly: for every chunk
+  there is an offset `i` into its source page where `page[i:i+len(chunk)] == chunk`. Also
+  paragraph packing, heading boundaries, disjointness, size limits, and edge cases.
+- `tests/test_document_store.py` — schema init, chunk and embedding round-trip, cascade
+  delete with an explicit no-orphans check.
+- `tests/test_search.py` — index rebuild from persisted chunks, index size, `top_k`,
+  `doc_id` filtering, ranking, removal, and empty-index behaviour.
+
+**One known defect is recorded as a strict `xfail`** in `test_chunking.py`, not hidden:
+`_split_paragraphs` strips each paragraph and rejoins with a literal `"\n\n"`, so a source
+whose paragraph separator is not exactly `"\n\n"` (a blank line containing spaces, a
+doubled blank line, an indented or trailing-space paragraph) produces a chunk that is *not*
+a verbatim substring of its source. The current demo corpus does not trigger it — all 17
+chunks pass the invariant, which is why the published 115/115 grounding figure stands — but
+an arbitrary uploaded PDF could. The marker is strict, so it will start failing the moment
+the chunker is fixed and the marker is stale.
+
+Still to come:
+
 - API contract tests for each endpoint via `fastapi.testclient`, with the Claude call stubbed
-- CI on push, running the test suite and the API-free `retrieval_probe.py`
-
-This section will be updated with the runner command and coverage once the suite lands.
+- A scheduled CI job running the API-free `retrieval_probe.py`, which needs the embedding
+  model and so does not belong in the hermetic per-push run
