@@ -1,0 +1,28 @@
+#!/bin/sh
+# Blocks a commit whose staged changes contain a detectable secret.
+# Enable once per clone:  git config core.hooksPath .githooks
+# Requires gitleaks:      brew install gitleaks
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks not installed, skipping secret scan" >&2
+  exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+tmp=$(mktemp -d) || exit 0
+trap 'rm -rf "$tmp"' EXIT
+
+printf '%s\n' "$staged" | while IFS= read -r f; do
+  mkdir -p "$tmp/$(dirname "$f")"
+  git show ":$f" > "$tmp/$f" 2>/dev/null
+done
+
+if ! gitleaks dir "$tmp" --no-banner --redact 2>&1; then
+  echo "" >&2
+  echo "pre-commit: secret detected in staged changes, commit blocked." >&2
+  echo "Remove the secret, or bypass with 'git commit --no-verify' if it is a false positive." >&2
+  exit 1
+fi
+exit 0
