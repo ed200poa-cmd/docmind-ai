@@ -65,20 +65,24 @@ API calls (30 answer, 23 judge).
 | answer correctness — multi_chunk (n=8) | 75.0% correct |
 | citation grounding | 100.0% (115 of 115 citations verified verbatim) |
 | refusal accuracy | 100.0% (7 of 7), zero hallucinations |
-| median latency | 1.15s / 1.13s |
-| p95 latency | 4.89s / 2.23s |
+| median latency | 1.03s |
+| p95 latency | 1.83s |
 
 Citation grounding and refusal accuracy are treated as protected metrics: a change that
 lowers either is reverted regardless of what it improves elsewhere. Both have held at 100%
 across every run.
 
-Two figures are reported as pairs because the numbers come from two consecutive full runs
-(`evals/results/eval_20260730T122037Z.json` and `eval_20260730T122154Z.json`, 2026-07-30).
-All 30 case verdicts and every correctness, grounding, refusal, and recall figure were
-identical across both runs. Latency was not — it is wall-clock, and run 1's p95 reflects a
-single slow outlier call. The judge runs at temperature 0, which makes verdicts reproducible;
-it does not make the generated text byte-identical, and the free-text answer and judge
-rationale still vary slightly between runs.
+The figures above come from the most recent full run
+(`evals/results/eval_20260803T022554Z.json`, 2026-08-03, after the chunker fix). Every
+correctness, grounding, refusal, and recall figure is identical to the two consecutive
+confirmation runs that preceded it (`eval_20260730T122037Z.json` and
+`eval_20260730T122154Z.json`, 2026-07-30), which agreed with each other on all 30 case
+verdicts. Latency is the one column that moved: median went from 1.15s / 1.13s to 1.03s. It
+is wall-clock rather than a verdict, and p95 has never been reproducible run to run (the
+2026-07-30 pair measured 4.89s and 2.23s, where run 1 reflects a single slow outlier call).
+The judge runs at temperature 0, which makes verdicts reproducible; it does not make the
+generated text byte-identical, and the free-text answer and judge rationale still vary
+slightly between runs.
 
 For reference, the pre-optimisation baseline (`eval_20260720T124830Z.json`) measured 73.9%
 recall@1 and 4.3% incorrect answers. Full history and per-change analysis:
