@@ -24,6 +24,15 @@ audio_cache/
 # Eval results (may contain generated answers / API responses; keep the dir, not the runs)
 evals/results/*
 !evals/results/.gitkeep
+# Five runs are the evidence behind the published numbers, so they are tracked.
+# Each was checked for credentials and personal data before being added; the
+# corpus in them is this repository's own demo document. See evals/results/README.md.
+!evals/results/README.md
+!evals/results/eval_20260720T124830Z.json
+!evals/results/eval_20260730T014202Z.json
+!evals/results/eval_20260730T122037Z.json
+!evals/results/eval_20260730T122154Z.json
+!evals/results/eval_20260803T022554Z.json
 
 # OS
 .DS_Store
