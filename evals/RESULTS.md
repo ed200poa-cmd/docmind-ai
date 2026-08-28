@@ -42,6 +42,10 @@ and recall@k value in the After column is **identical in both runs**, so a singl
 reported. Latency is the one exception — it is wall-clock, not a verdict, so both runs' values
 are shown (run 1 / run 2); see the p95 note under "What is still failing."
 
+**2026-08-28.** The two latency figures in this table are two draws, not a settled value.
+Two later runs of the same timed path measured 1.018s and 1.025s. See the retraction
+under the chunker-fix table for the four-run picture and the restated endpoint of 1.08s.
+
 **Protected metrics held.** Citation grounding (100.0%, 115 citations checked) and refusal
 accuracy (100.0%, 7/7, zero hallucinations) are identical in both columns — no change was
 reverted, because none broke either guardrail. The factual recall@1 guardrail also held: it
@@ -168,7 +172,10 @@ facts/caveats from the excerpt just because they're nearby.
 than score: average generated-answer length dropped 31.0 → 28.6 words for `factual`
 cases and 89.1 → 77.9 words for `multi_chunk` cases. `factual_01`'s answer no longer
 includes the unrelated flexible-work-arrangements sentence. Median latency also
-improved (1.60s → 1.42s), plausibly because shorter answers mean fewer output tokens.
+improved (1.60s → 1.42s), plausibly because shorter answers mean fewer output tokens. That
+step was measured once at each code state. The run-to-run range later measured on an
+unchanged path is 0.127s, so read this 0.18s step with that in mind; it is reported as it
+was measured and has not been repeated.
 
 ## What is still failing
 
@@ -350,7 +357,7 @@ document). After = `evals/results/eval_20260803T022554Z.json`, one full 30-case 
 | answer correct — multi_chunk (n=8) | 75.0% | 75.0% | 0 |
 | **citation grounding (protected)** | 100.0% (115/115) | **100.0% (115/115)** | 0 (held) |
 | **refusal accuracy (protected)** | 100.0% (7/7) | **100.0% (7/7)** | 0 (held) |
-| median latency | 1.15s / 1.13s | 1.03s | -0.12s |
+| median latency | see the retraction below | see the retraction below | **claim withdrawn** |
 | p95 latency | 4.89s / 2.23s | 1.83s | within observed run-to-run spread |
 | API calls per full run | 53 | 53 | 0 |
 | indexed chunk count | 17 | 17 | 0 |
@@ -358,9 +365,49 @@ document). After = `evals/results/eval_20260803T022554Z.json`, one full 30-case 
 **Protected metrics held.** Citation grounding 100.0% with all 115 citations verified as
 verbatim substrings, refusal accuracy 100.0% (7/7) with zero hallucinations. The two
 `partially_correct` cases are the same ones as in both 2026-07-30 runs (`multi_chunk_03`,
-`multi_chunk_07`), so this run agrees with them at the verdict level on all 30 cases. Latency
-is the only column that moved, and it moved in the good direction; it is wall-clock, not a
-verdict, and p95 has never been reproducible run to run (see "What is still failing").
+`multi_chunk_07`), so this run agrees with them at the verdict level on all 30 cases.
+
+**Retraction, 2026-08-28: the latency row of this table said 1.15s / 1.13s to 1.03s,
+-0.12s. That claim is withdrawn.** It attributed a latency improvement to this step, and
+the difference is inside the spread of runs that measured the same work.
+
+Four runs measure a timed path that does the same thing. `run_eval.py` starts its clock
+before `rag_engine.search` and stops it after `claude_qa.answer_question` returns, and
+across these four runs neither of those two files changed in any way that alters that
+work. `rag_engine.py` was last touched on 2026-07-20 at 09:23 (`18ecd33`) and then not
+again until 2026-08-02 at 22:27 (`9f1b845`); `claude_qa.py` was last touched on 2026-07-20
+at 09:29 (`fb04ca7`) and never since. The one change in between, `9f1b845`, is the chunker
+fix, and comparing the runs on either side of it shows the retrieved chunk text is
+identical case for case: the same 17 distinct chunks, concatenated SHA-256
+`ca4ba8543fcd786b` in both. The prompt Claude received did not change, so the timed span
+was doing identical work every time.
+
+| run | median |
+|---|---|
+| `eval_20260730T014202Z` | 1.018s |
+| `eval_20260730T122037Z` | 1.145s |
+| `eval_20260730T122154Z` | 1.128s |
+| `eval_20260803T022554Z` | 1.025s |
+
+The spread is **0.127s**, and the improvement this row claimed was 0.12s. A step smaller
+than the spread of the unchanged system is not a measurement of that step. Note also that
+1.018s was reached on 2026-07-30, before the chunker fix, so 1.03s was not a new floor.
+
+This is a different kind of correction from the chunker one recorded above, and the two
+should not be read together. That one left every result where it was: the chunks were
+already byte-identical, and what was wrong was the description of what the tests
+guaranteed. This one withdraws an improvement that was written down as measured and was
+inside the noise.
+
+**The endpoint, restated.** Rather than name one run, the end state of this work is the
+**median of those four run medians, 1.08s** (1.0765s before rounding), with the observed
+range **1.018s to 1.145s**. Against the 1.72s baseline
+(`eval_20260720T124830Z`, re-derived from its 30 per-case `latency_sec` values) that is a
+drop of **0.64s**, more than five times the 0.127s run-to-run range. The direction holds
+comfortably. The endpoint is a range with a middle, not a single number.
+
+Latency here is wall-clock, not a verdict, and p95 has never been reproducible run to run
+(see "What is still failing").
 
 Retrieval was also re-verified API-free before the paid run
 (`evals/results/retrieval_probe_20260803T022409Z.json`): 87.0% / 95.7% / 100.0% overall and

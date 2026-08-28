@@ -65,21 +65,27 @@ API calls (30 answer, 23 judge).
 | answer correctness — multi_chunk (n=8) | 75.0% correct |
 | citation grounding | 100.0% (115 of 115 citations verified verbatim) |
 | refusal accuracy | 100.0% (7 of 7), zero hallucinations |
-| median latency | 1.03s |
+| median latency | 1.08s (median of four runs; range 1.018s to 1.145s) |
 | p95 latency | 1.83s |
 
 Citation grounding and refusal accuracy are treated as protected metrics: a change that
 lowers either is reverted regardless of what it improves elsewhere. Both have held at 100%
 across every run.
 
-The figures above come from the most recent full run
-(`evals/results/eval_20260803T022554Z.json`, 2026-08-03, after the chunker fix). Every
+The figures above except latency come from the most recent full run
+(`evals/results/eval_20260803T022554Z.json`, 2026-08-03, after the chunker fix); the
+latency figure is the median across four runs, named in `evals/RESULTS.md`. Every
 correctness, grounding, refusal, and recall figure is identical to the two consecutive
 confirmation runs that preceded it (`eval_20260730T122037Z.json` and
 `eval_20260730T122154Z.json`, 2026-07-30), which agreed with each other on all 30 case
-verdicts. Latency is the one column that moved: median went from 1.15s / 1.13s to 1.03s. It
-is wall-clock rather than a verdict, and p95 has never been reproducible run to run (the
-2026-07-30 pair measured 4.89s and 2.23s, where run 1 reflects a single slow outlier call).
+verdicts. Latency is reported differently from the rest of this table. It is wall-clock,
+and four runs whose timed path did the same work measured 1.018s, 1.145s, 1.128s and
+1.025s, a range of 0.127s, so no single run is quoted as the value: the figure above is
+the median of those four. An earlier version of this README said median went from
+1.15s / 1.13s to 1.03s; that claimed a 0.12s improvement that is inside the 0.127s range,
+and it is withdrawn. See the retraction in [`evals/RESULTS.md`](evals/RESULTS.md). p95 has
+never been reproducible run to run (the 2026-07-30 pair measured 4.89s and 2.23s, where
+run 1 reflects a single slow outlier call).
 The judge runs at temperature 0, which makes verdicts reproducible; it does not make the
 generated text byte-identical, and the free-text answer and judge rationale still vary
 slightly between runs.
