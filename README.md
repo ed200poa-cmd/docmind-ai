@@ -92,7 +92,9 @@ slightly between runs.
 
 For reference, the pre-optimisation baseline (`eval_20260720T124830Z.json`) measured 73.9%
 recall@1 and 4.3% incorrect answers. Full history and per-change analysis:
-[`evals/RESULTS.md`](evals/RESULTS.md).
+[`evals/RESULTS.md`](evals/RESULTS.md). What these numbers do and do not support,
+figure by figure:
+[`docs/what-can-and-cannot-be-claimed.md`](docs/what-can-and-cannot-be-claimed.md).
 
 ### multi_chunk recall@1 is a metric artifact, not a retrieval defect
 
