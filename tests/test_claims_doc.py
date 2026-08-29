@@ -16,7 +16,14 @@ from pathlib import Path
 
 import pytest
 
+# These check documentation against artifacts. They are offline like the rest of
+# the suite, but they do not exercise the retrieval pipeline, and the published
+# test count means the pipeline suite. The marker keeps the two countable apart.
+pytestmark = pytest.mark.docs
+
 ROOT = Path(__file__).resolve().parent.parent
+PIPELINE_MODULES = {"tests/test_chunking.py", "tests/test_document_store.py",
+                    "tests/test_search.py"}
 DOC = ROOT / "docs" / "what-can-and-cannot-be-claimed.md"
 RESULTS = ROOT / "evals" / "results"
 
@@ -157,3 +164,22 @@ def test_the_document_does_not_use_em_dashes(text):
 def test_the_closing_line_is_present(text):
     assert text.rstrip().endswith(
         "Any claim not in this document is not supported by this repository.")
+
+
+def test_the_published_test_counts_match_the_collected_suite(text, request):
+    """The document states a total and a split. Both come from pytest here, so
+    adding a test without updating the document fails rather than drifting."""
+    counts = getattr(request.config, "suite_counts", None)
+    assert counts is not None, "the collection hook in conftest.py did not run"
+    if not PIPELINE_MODULES.issubset(counts["modules"]):
+        pytest.skip("run the whole suite to check the published counts")
+    assert counts["pipeline"] + counts["docs"] == counts["total"]
+    assert f"suite of {counts['total']} tests" in text, \
+        f"the document does not state the collected total, {counts['total']}"
+    assert f"{counts['pipeline']} of them cover" in text, \
+        f"the document does not state the pipeline count, {counts['pipeline']}"
+    assert f"other {counts['docs']} re-derive" in text, \
+        f"the document does not state the document-test count, {counts['docs']}"
+    assert f"**{counts['total']} offline tests**" in text
+    assert f"{counts['pipeline']} cover chunking" in text
+    assert f"{counts['docs']} check that this document" in text

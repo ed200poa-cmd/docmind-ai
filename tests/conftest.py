@@ -100,3 +100,18 @@ def demo_policy_text() -> str:
     return (PROJECT_ROOT / "demo_docs" / "company_policy.txt").read_text(
         encoding="utf-8"
     ).strip()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Record how the collected suite splits between pipeline and document tests.
+
+    The published test count means the pipeline suite, so the two kinds have to
+    be countable separately and the count has to come from pytest rather than
+    from someone remembering to update a number.
+    """
+    config.suite_counts = {
+        "total": len(items),
+        "docs": sum(1 for i in items if i.get_closest_marker("docs")),
+        "pipeline": sum(1 for i in items if not i.get_closest_marker("docs")),
+        "modules": {i.nodeid.split("::")[0] for i in items},
+    }
