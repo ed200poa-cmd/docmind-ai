@@ -1,0 +1,15 @@
+# Extends the default gitleaks rules. Nothing here disables a rule; the one
+# allowlist below exempts a single literal shape that is not a secret.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Eval artifact names. Runs are named eval_<UTC timestamp>Z and the prose in
+evals/RESULTS.md refers to them in sentences like "the last full run with the
+key, eval_20260720T132826Z". The generic-api-key rule sees a high-entropy token
+next to the word "key" and flags the filename. The pattern below matches only
+that exact shape: the literal prefix eval_, eight digits, T, six digits, Z.
+No API key format can match it, so this narrows nothing else.
+"""
+regexes = ['''eval_20\d{6}T\d{6}Z''']

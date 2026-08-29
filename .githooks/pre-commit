@@ -19,7 +19,13 @@ printf '%s\n' "$staged" | while IFS= read -r f; do
   git show ":$f" > "$tmp/$f" 2>/dev/null
 done
 
-if ! gitleaks dir "$tmp" --no-banner --redact 2>&1; then
+# Scan with the repository's config when it has one. The staged copies live in a
+# scratch directory, and gitleaks looks for .gitleaks.toml beside the files it is
+# scanning, so the path has to be passed explicitly or the config is ignored.
+conf=""
+[ -f .gitleaks.toml ] && conf="--config .gitleaks.toml"
+
+if ! gitleaks dir "$tmp" $conf --no-banner --redact 2>&1; then
   echo "" >&2
   echo "pre-commit: secret detected in staged changes, commit blocked." >&2
   echo "Remove the secret, or bypass with 'git commit --no-verify' if it is a false positive." >&2
