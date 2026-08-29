@@ -54,3 +54,7 @@ credentials*.json
 service-account*.json
 .azure/
 *.pyc
+
+# Per call MCP trace. The default path is inside the project; runs that are
+# evidence write it into the evidence directory instead via DOCMIND_MCP_TRACE.
+mcp-trace.jsonl

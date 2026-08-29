@@ -13,11 +13,17 @@ excerpts and citations.
 Run:  python mcp_server.py
 """
 
+import contextvars
+import functools
+import json
+import os
 import sys
 import logging
 import contextlib
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 # stdio transport speaks JSON-RPC over stdout. Anything else written there corrupts the
 # stream, so logs go to stderr before any project import can call logging.basicConfig().
@@ -39,6 +45,71 @@ document_store.DB_PATH = PROJECT_DIR / "docmind.db"
 mcp = FastMCP("docmind")
 
 _ready = False
+
+# Per call tracing. A client sees only its own wall clock, which includes the
+# model's thinking time, so the server has to say how long its own work took if
+# the two are ever to be told apart. One JSON object per call, appended.
+#
+# DOCMIND_MCP_TRACE overrides the path. Set it to "off" to disable.
+TRACE_PATH = Path(os.getenv("DOCMIND_MCP_TRACE") or (PROJECT_DIR / "mcp-trace.jsonl"))
+
+_annotations: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
+    "docmind_mcp_annotations", default=None)
+
+
+def _annotate(**fields: Any) -> None:
+    """Let a tool body add identifying detail to its own trace record."""
+    current = _annotations.get()
+    if current is not None:
+        current.update(fields)
+
+
+def _write_trace(record: dict) -> None:
+    if str(TRACE_PATH) == "off":
+        return
+    try:
+        TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with TRACE_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        # Tracing must never take the server down.
+        logger.warning("could not write trace: %s", exc)
+
+
+def _instrumented(fn: Callable) -> Callable:
+    """Time one tool call and record it. Never records the response body.
+
+    What is kept is what identifies the call and lets it be matched against a
+    client side record: the tool, its arguments, how long the server spent, how
+    many results went back, and for a retrieval the chunk ids. The excerpt text
+    itself is not written, because the trace would otherwise become a second
+    copy of the corpus.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        token = _annotations.set({})
+        started = time.perf_counter()
+        record = {
+            "ts_start": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "tool": fn.__name__,
+            "arguments": {k: v for k, v in kwargs.items()},
+        }
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as exc:
+            record.update(ok=False, error=type(exc).__name__, error_message=str(exc)[:200])
+            raise
+        else:
+            record["ok"] = True
+            record["result_count"] = len(result) if isinstance(result, (list, tuple)) else 1
+            return result
+        finally:
+            record["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
+            record["ts_end"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            record.update(_annotations.get() or {})
+            _annotations.reset(token)
+            _write_trace(record)
+    return wrapper
 
 
 @contextlib.contextmanager
@@ -63,6 +134,7 @@ def _ensure_ready() -> None:
 
 
 @mcp.tool()
+@_instrumented
 def search_documents(
     question: str,
     doc_id: Optional[str] = None,
@@ -92,6 +164,8 @@ def search_documents(
     with _stdout_to_stderr():
         chunks = rag_engine.search(question, doc_id=doc_id, top_k=top_k)
 
+    _annotate(chunk_ids=[c["chunk_id"] for c in chunks])
+
     # Resolve filenames so the client can cite by name, not opaque id.
     docs: dict[str, dict | None] = {}
     for chunk in chunks:
@@ -116,6 +190,7 @@ def search_documents(
 
 
 @mcp.tool()
+@_instrumented
 def list_documents() -> list[dict]:
     """List every indexed document available to search."""
     _ensure_ready()
@@ -132,6 +207,7 @@ def list_documents() -> list[dict]:
 
 
 @mcp.tool()
+@_instrumented
 def get_document_info(doc_id: str) -> dict:
     """Return metadata for one indexed document."""
     _ensure_ready()
