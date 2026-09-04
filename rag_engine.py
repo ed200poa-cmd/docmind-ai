@@ -302,3 +302,81 @@ def remove_document(doc_id: str) -> bool:
     if deleted:
         _rebuild_index()
     return deleted
+
+
+# ---------------------------------------------------------------------------
+# Retention
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS. Until 2026-09-04 the database sat on the container's
+# writable layer, so every visitor upload was swept away by the next deploy.
+# That was not a policy, it was an accident of storage, and the sweep ran
+# every six to nineteen days -- the observed gap between docmind deploys. In
+# that window one visitor's file was listed to, and answerable by, the next.
+#
+# Putting the database on a volume fixed a memory cost and made that window
+# unbounded. So the window is now a decision instead of a side effect.
+#
+# FOUR HOURS. A recruiter trying the demo needs minutes. Four hours covers
+# someone who opens it, is interrupted, and comes back after lunch, and is
+# short enough that two different visitors are unlikely to overlap in it. Two
+# felt tight for the interrupted case; a working day is long enough that the
+# window stops meaning anything.
+UPLOAD_TTL_HOURS = 4
+
+#: Ceilings, all on visitor uploads only -- the seed is never counted or
+#: evicted. The volume is billed on what is used rather than the 4.88GB
+#: provisioned, so 200MB caps the volume line at roughly three cents a month
+#: while still allowing a real document to be tried.
+MAX_VISITOR_DOCUMENTS = 20
+MAX_VISITOR_BYTES = 200 * 1024 * 1024
+
+
+def enforce_retention() -> dict:
+    """Expire old visitor uploads and keep the store under its ceilings.
+
+    Called on the request path rather than by a scheduler: a demo with no
+    visitors needs no sweeping, and adding a cron service to Railway would
+    cost more per month than the storage it polices.
+
+    Everything deletes through remove_document, which raises rather than
+    touching the seed.
+    """
+    from datetime import datetime, timedelta
+
+    removed_expired: list[str] = []
+    removed_capacity: list[str] = []
+    cutoff = datetime.utcnow() - timedelta(hours=UPLOAD_TTL_HOURS)
+
+    for doc in document_store.visitor_documents_oldest_first():
+        try:
+            uploaded = datetime.fromisoformat(doc["upload_time"])
+        except (ValueError, TypeError):
+            continue                      # unparseable: leave it to the caps
+        if uploaded < cutoff:
+            if _safe_remove(doc["doc_id"]):
+                removed_expired.append(doc["doc_id"])
+
+    count, total = document_store.visitor_totals()
+    for doc in document_store.visitor_documents_oldest_first():
+        if count <= MAX_VISITOR_DOCUMENTS and total <= MAX_VISITOR_BYTES:
+            break
+        if _safe_remove(doc["doc_id"]):
+            removed_capacity.append(doc["doc_id"])
+            count -= 1
+            total -= doc.get("file_size") or 0
+
+    if removed_expired or removed_capacity:
+        logger.info("Retention: %d expired, %d evicted for capacity",
+                    len(removed_expired), len(removed_capacity))
+    return {"expired": removed_expired, "evicted": removed_capacity}
+
+
+def _safe_remove(doc_id: str) -> bool:
+    """remove_document, but a protected seed is a no-op rather than a 500."""
+    try:
+        return remove_document(doc_id)
+    except document_store.SeedDocumentProtected:
+        logger.warning("Retention tried to remove the seed document %s. "
+                       "Refused. This should not happen: the queries it walks "
+                       "already exclude seeds.", doc_id)
+        return False

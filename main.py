@@ -23,8 +23,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# 5 MB, down from 10. The seed document is 7 KB and a 5 MB PDF already runs to
+# hundreds of pages, so this refuses nothing a visitor would try while halving
+# what a single request can put on the volume.
+MAX_FILE_SIZE = 5 * 1024 * 1024
 DEMO_DOC_PATH = Path(__file__).parent / "demo_docs" / "company_policy.txt"
+SEED_FILENAME = "company_policy.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -36,19 +41,40 @@ async def lifespan(app: FastAPI):
     document_store.init_db()
     rag_engine.init_rag()
 
-    # Auto-load demo document on first run
-    if not document_store.filename_exists("company_policy.txt"):
-        if DEMO_DOC_PATH.exists():
+    # The seed document, and the guarantee that there is always exactly one.
+    #
+    # Keyed on the is_seed flag rather than the filename: a visitor may upload
+    # their own company_policy.txt, and a name check would then mistake it for
+    # ours -- protecting their file from deletion and leaving the real seed
+    # unprotected.
+    #
+    # Three cases, in order:
+    #   * a seed row exists          -> nothing to do, and no model is loaded,
+    #                                   which is the whole point of the volume
+    #   * a row from before the flag -> adopt it, still no model
+    #   * nothing                    -> ingest, which loads the model once ever
+    seed = document_store.get_seed()
+    if seed is None:
+        legacy = document_store.get_document_by_filename(SEED_FILENAME)
+        if legacy:
+            document_store.mark_seed(legacy["doc_id"])
+            logger.info("Adopted existing %s as the seed document (%s).",
+                        SEED_FILENAME, legacy["doc_id"])
+        elif DEMO_DOC_PATH.exists():
             try:
                 content = DEMO_DOC_PATH.read_bytes()
                 result = rag_engine.process_document(
                     file_bytes=content,
-                    filename="company_policy.txt",
+                    filename=SEED_FILENAME,
                     file_size=len(content),
                 )
-                logger.info("Demo document loaded: %s", result)
+                document_store.mark_seed(result["doc_id"])
+                logger.info("Seed document loaded: %s", result)
             except Exception as exc:
-                logger.warning("Could not auto-load demo document: %s", exc)
+                logger.warning("Could not auto-load seed document: %s", exc)
+    else:
+        logger.info("Seed document present (%s); not re-ingesting.",
+                    seed["doc_id"])
 
     logger.info("DocMind AI is ready.")
     yield
@@ -96,7 +122,27 @@ async def upload_document(file: UploadFile = File(...)):
     if len(file_bytes) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Maximum size is {MAX_FILE_SIZE // 1024 // 1024} MB.",
+            detail=(
+                f"That file is {len(file_bytes) / 1024 / 1024:.1f} MB. This demo "
+                f"accepts up to {MAX_FILE_SIZE // 1024 // 1024} MB per file — "
+                f"try a shorter document, or a few pages of this one."
+            ),
+        )
+
+    # Sweep before accepting, so a visitor's own upload is never the one
+    # evicted to make room for it.
+    rag_engine.enforce_retention()
+
+    count, total = document_store.visitor_totals()
+    if total + len(file_bytes) > rag_engine.MAX_VISITOR_BYTES:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                "This demo is temporarily full — a few people are trying it at "
+                f"once. Uploads are cleared after {rag_engine.UPLOAD_TTL_HOURS} "
+                "hours, so this frees up shortly. The pre-loaded HR policy "
+                "document is still there to ask questions about."
+            ),
         )
 
     if len(file_bytes) == 0:
@@ -125,6 +171,24 @@ async def ask_question(body: AskRequest):
     if len(question) > 1000:
         raise HTTPException(status_code=400, detail="Question is too long (max 1000 chars).")
 
+    # SCOPE. An unscoped question used to search every chunk of every
+    # document, which meant one visitor's upload was answerable by the next
+    # one to open the page. It now falls back to the seed document.
+    #
+    # This costs the demo nothing: the frontend sends no doc_id only before
+    # anything has been uploaded, and at that moment the seed is the only
+    # thing worth searching. After an upload the browser holds the doc_id and
+    # sends it, so a visitor still asks about their own file.
+    #
+    # It is not access control -- someone who learns another doc_id can still
+    # pass it -- and it is not meant to be. It closes the path where a
+    # visitor reads a stranger's document without trying to.
+    scope_id = body.doc_id
+    if not scope_id:
+        seed = document_store.get_seed()
+        if seed:
+            scope_id = seed["doc_id"]
+
     doc_name: str | None = None
     if body.doc_id:
         doc = document_store.get_document(body.doc_id)
@@ -132,7 +196,7 @@ async def ask_question(body: AskRequest):
             raise HTTPException(status_code=404, detail=f"Document '{body.doc_id}' not found.")
         doc_name = doc["filename"]
 
-    chunks = rag_engine.search(question=question, doc_id=body.doc_id)
+    chunks = rag_engine.search(question=question, doc_id=scope_id)
 
     result = claude_qa.answer_question(
         question=question,
@@ -144,13 +208,27 @@ async def ask_question(body: AskRequest):
 
 @app.get("/documents")
 async def list_documents():
+    # The list is what one visitor sees of another, so it is also where the
+    # sweep is most useful: an expired upload is gone before it is shown.
+    rag_engine.enforce_retention()
     docs = document_store.get_all_documents()
     return JSONResponse({"total": len(docs), "documents": docs})
 
 
 @app.delete("/documents/{doc_id}")
 async def delete_document(doc_id: str):
-    deleted = rag_engine.remove_document(doc_id)
+    try:
+        deleted = rag_engine.remove_document(doc_id)
+    except document_store.SeedDocumentProtected:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "The pre-loaded sample document cannot be removed — it is what "
+                "this demo has to answer questions about. Documents you upload "
+                "can be deleted, and clear themselves after "
+                f"{rag_engine.UPLOAD_TTL_HOURS} hours."
+            ),
+        )
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
     return JSONResponse({"deleted": doc_id, "status": "ok"})

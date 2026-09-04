@@ -68,9 +68,9 @@ sentence.
 **API cost per run.** 30 answer calls and 23 judge calls, 53 total, unchanged
 across every run.
 
-**An offline suite of 99 tests**, 98 passing and 1 skipped, with no API call and
+**An offline suite of 110 tests**, 109 passing and 1 skipped, with no API call and
 no network. The suite has two kinds of test in it and they are worth keeping
-apart. **85 of them cover** chunking, storage, search and the MCP tool surface:
+apart. **96 of them cover** chunking, storage, retention, search and the MCP tool surface:
 they exercise the code a caller reaches, and they are the count meant by
 "offline tests" wherever this project reports one. The other 14 re-derive every
 figure in this document
@@ -125,7 +125,7 @@ not enough to state a rate.
 | **answer correctness 91.3%** | 21 of 23 answerable cases graded correct by an LLM judge at temperature 0, with 0.0% incorrect. Run `eval_20260803T022554Z`. The same verdicts appeared in both 2026-07-30 confirmation runs. | "91.3% is the system's accuracy." n=23, one document, questions written against that document. The two non-correct cases are both `multi_chunk`, where the category rate is 75.0% (n=8). On a 2566-chunk corpus the same cases give 73.9% (measured in `copilot-mcp-bridge`, not here). |
 | **citation grounding 100.0%, 115 of 115** | Every cited chunk is present verbatim in the source document. No quotation was fabricated, in any of the five runs. | "The citations were relevant", or that this says anything about the answer model. The `sources` field is the retrieval result echoed back, and `_chunk_pages` emits every chunk as a contiguous slice of its page, so the check tests a substring for membership in the string it was cut from. Verified here: every retrieved chunk in all five runs is a substring of `demo_docs/company_policy.txt`. On a single-document corpus this check cannot fail. |
 | **refusal accuracy 100.0%, 7 of 7** | All seven unanswerable questions were declined, with zero hallucinations, in run `eval_20260803T022554Z`. n=7. | "The system does not hallucinate." n=7, and every one of those questions was asked against a corpus containing nothing that resembles an answer. Add four near-domain documents and the same seven cases give 6 of 7 (measured in `copilot-mcp-bridge`, not here). |
-| **99 offline tests** | 98 passing and 1 skipped, no API call and no network, run in CI. **85 cover chunking**, storage, search and the MCP tool surface, and that 85 is what "offline tests" counts here; the other 14 check that this document's figures still match the tracked artifacts. | Quoting one total without saying which kind. A count that mixes pipeline tests with tests of this page's own prose describes two different things. And presenting either as evidence for a retrieval or answer figure: every quality number here comes from the five tracked runs, not from the suite. |
+| **110 offline tests** | 109 passing and 1 skipped, no API call and no network, run in CI. **96 cover chunking**, storage, retention, search and the MCP tool surface, and that 96 is what "offline tests" counts here; the other 14 check that this document's figures still match the tracked artifacts. | Quoting one total without saying which kind. A count that mixes pipeline tests with tests of this page's own prose describes two different things. And presenting either as evidence for a retrieval or answer figure: every quality number here comes from the five tracked runs, not from the suite. |
 
 ---
 
