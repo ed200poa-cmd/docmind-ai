@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -321,14 +322,34 @@ def remove_document(doc_id: str) -> bool:
 # short enough that two different visitors are unlikely to overlap in it. Two
 # felt tight for the interrupted case; a working day is long enough that the
 # window stops meaning anything.
-UPLOAD_TTL_HOURS = 4
+#
+# All four numbers below take an environment variable so they can be tuned on
+# the running service without a deploy, and so a short TTL can be set briefly
+# to watch the sweep actually fire instead of waiting four hours to believe
+# it. The defaults are the policy; the variables are for operating it.
+def _num(env: str, default: float) -> float:
+    raw = os.getenv(env)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number; using %s", env, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s=%r is not positive; using %s", env, raw, default)
+        return default
+    return value
+
+
+UPLOAD_TTL_HOURS = _num("DOCMIND_TTL_HOURS", 4)
 
 #: Ceilings, all on visitor uploads only -- the seed is never counted or
 #: evicted. The volume is billed on what is used rather than the 4.88GB
 #: provisioned, so 200MB caps the volume line at roughly three cents a month
 #: while still allowing a real document to be tried.
-MAX_VISITOR_DOCUMENTS = 20
-MAX_VISITOR_BYTES = 200 * 1024 * 1024
+MAX_VISITOR_DOCUMENTS = int(_num("DOCMIND_MAX_DOCUMENTS", 20))
+MAX_VISITOR_BYTES = int(_num("DOCMIND_MAX_MB", 200) * 1024 * 1024)
 
 
 def enforce_retention() -> dict:
