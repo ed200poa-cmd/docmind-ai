@@ -1,13 +1,37 @@
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-import faiss
-from fastembed import TextEmbedding
 
 import document_store
+
+# `faiss` and `fastembed` are imported inside the functions that use them.
+# fastembed drags in onnxruntime and tokenizers, faiss its own native library,
+# and together they were most of a 335MB resident set held to answer a handful
+# of requests a week.
+#
+# THIS ONLY PAYS BECAUSE THE BOOT PATH NO LONGER NEEDS THE MODEL. An earlier
+# attempt at exactly this change was reverted on 2026-09-03 after measuring
+# that it saved nothing: main.py's lifespan re-ingested the demo document on
+# every boot, because the SQLite file sat on the container's writable layer
+# and did not survive a deploy, and ingestion loads the model. The database is
+# on a volume now (see document_store.DB_PATH), the demo document is ingested
+# once ever, and deferring the import finally reaches something.
+#
+# Rebuilding the index does NOT need the model: the embeddings are already in
+# SQLite as BLOBs and _rebuild_index only reads them back. Only NEW text -- an
+# upload, or a question -- needs it.
+#
+# `from __future__ import annotations` makes the hints below strings at
+# runtime, so `Optional[faiss.Index]` no longer requires faiss to be loaded.
+# numpy stays eager: document_store imports it anyway.
+if TYPE_CHECKING:  # pragma: no cover
+    import faiss
+    from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +52,10 @@ _chunk_id_map: list[int] = []  # faiss_position -> sqlite chunk.id
 def get_model() -> TextEmbedding:
     global _model
     if _model is None:
+        # The import sits with the construction: the first caller that needs
+        # an embedding pays for onnxruntime and the weights, and no boot does.
+        from fastembed import TextEmbedding
+
         logger.info("Loading embedding model '%s'…", EMBEDDING_MODEL)
         _model = TextEmbedding(model_name=EMBEDDING_MODEL)
         logger.info("Embedding model ready.")
@@ -41,6 +69,9 @@ def init_rag() -> None:
 
 
 def _rebuild_index() -> None:
+    # faiss, but not the model: the vectors are already in SQLite.
+    import faiss
+
     global _index, _chunk_id_map
     _index = faiss.IndexFlatIP(EMBEDDING_DIM)
     _chunk_id_map = []
@@ -233,6 +264,8 @@ def search(question: str, doc_id: Optional[str] = None, top_k: int = TOP_K) -> l
     """Return top-k relevant chunks for a question."""
     if _index is None or _index.ntotal == 0:
         return []
+
+    import faiss
 
     q_vec = embed([question])
     faiss.normalize_L2(q_vec)

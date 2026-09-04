@@ -1,13 +1,36 @@
+import os
 import sqlite3
 import uuid
 import numpy as np
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path("docmind.db")
+# WHERE THE DATABASE LIVES, and why it is not just "docmind.db" any more.
+#
+# This file holds the documents, the chunks and their embeddings as BLOBs, and
+# rag_engine rebuilds the FAISS index from those embeddings at startup. So the
+# database is not a cache: it is the only copy of work that cost an embedding
+# model to produce.
+#
+# On a relative path it sat in the container's writable layer and vanished on
+# every deploy. The visible cost was not the lost uploads -- a demo's uploads
+# are disposable -- it was that main.py's lifespan re-ingested the demo
+# document on every single boot, because filename_exists() was always False,
+# and that ingestion is the one thing on the startup path that needs the
+# embedding model. Loading it there held ~200MB resident for the life of the
+# process to answer about four requests a week.
+#
+# DOCMIND_DB_PATH points at a Railway volume in production. Unset, the
+# behaviour is exactly what it was, so local runs and the test suite are
+# unaffected.
+DB_PATH = Path(os.getenv("DOCMIND_DB_PATH") or "docmind.db")
 
 
 def init_db() -> None:
+    # The volume mount exists but its subdirectories do not, and sqlite3 will
+    # not create a parent for its file.
+    if DB_PATH.parent != Path("."):
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("""
