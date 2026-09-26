@@ -245,3 +245,7 @@ Still to come:
 - API contract tests for each endpoint via `fastapi.testclient`, with the Claude call stubbed
 - A scheduled CI job running the API-free `retrieval_probe.py`, which needs the embedding
   model and so does not belong in the hermetic per-push run
+
+## License
+
+MIT. See [LICENSE](LICENSE).
