@@ -28,6 +28,24 @@ Rules:
 - Do not reference your training data or general knowledge."""
 
 
+def _usage_dict(message) -> Optional[dict]:
+    """Token counts for one API response, or None when no call was made.
+
+    Instrumentation only: this reads response.usage and does not change the
+    request, the prompt, or the answer. Cache fields are reported separately
+    because cached input is priced differently from base input.
+    """
+    u = getattr(message, "usage", None)
+    if u is None:
+        return None
+    return {
+        "input_tokens": getattr(u, "input_tokens", 0) or 0,
+        "output_tokens": getattr(u, "output_tokens", 0) or 0,
+        "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+        "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+    }
+
+
 def _build_context(chunks: list[dict]) -> str:
     parts = []
     for i, chunk in enumerate(chunks, 1):
@@ -50,6 +68,7 @@ def answer_question(
             "sources": [],
             "doc_used": doc_name or "none",
             "model": MODEL,
+            "usage": None,
         }
 
     context = _build_context(chunks)
@@ -73,8 +92,10 @@ def answer_question(
             "sources": chunks,
             "doc_used": doc_name or "unknown",
             "model": "fallback",
+            "usage": None,
         }
 
+    usage = None
     try:
         client = anthropic.Anthropic(api_key=api_key)
         create_kwargs = dict(
@@ -87,6 +108,7 @@ def answer_question(
             create_kwargs["temperature"] = temperature
         message = client.messages.create(**create_kwargs)
         answer = message.content[0].text.strip()
+        usage = _usage_dict(message)
     except anthropic.AuthenticationError:
         answer = "Invalid API key. Please check your ANTHROPIC_API_KEY in .env."
     except anthropic.RateLimitError:
@@ -107,4 +129,5 @@ def answer_question(
         ],
         "doc_used": doc_name or "unknown",
         "model": MODEL,
+        "usage": usage,
     }

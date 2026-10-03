@@ -56,6 +56,100 @@ JUDGE_MODEL = "claude-haiku-4-5-20251001"
 ANSWER_TEMPERATURE = 0
 JUDGE_TEMPERATURE = 0
 
+# ---------------------------------------------------------------------------
+# Cost instrumentation. Added 2026-10-03.
+#
+# This block only *measures*. It does not touch the dataset, the grading logic,
+# the judge model, or any prompt.
+#
+# Prices are USD per million tokens (MTok), copied from the official pricing
+# page. Do not edit these from memory -- re-check the page and update the
+# verification date below.
+#   Source:   https://platform.claude.com/docs/en/about-claude/pricing
+#             (requested as https://docs.claude.com/en/docs/about-claude/pricing,
+#              which redirects to the platform URL above)
+#   Verified: 2026-10-03
+#
+# Known limit: the API returns a single `cache_creation_input_tokens` figure and
+# does not say whether a write used the 5-minute or the 1-hour TTL, which are
+# priced differently ($1.25 vs $2.00 / MTok for Haiku 4.5). This harness sends
+# no `cache_control`, so cache fields are expected to be 0; if they are ever
+# non-zero, cache writes are costed at the 5-minute rate and the summary says so.
+PRICING_SOURCE_URL = "https://platform.claude.com/docs/en/about-claude/pricing"
+PRICING_VERIFIED_DATE = "2026-10-03"
+PRICING_USD_PER_MTOK = {
+    "claude-haiku-4-5-20251001": {
+        "input": 1.00,
+        "output": 5.00,
+        "cache_write_5m": 1.25,
+        "cache_write_1h": 2.00,
+        "cache_read": 0.10,
+    },
+}
+USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
+
+
+def _empty_usage() -> dict:
+    return {f: 0 for f in USAGE_FIELDS}
+
+
+def _add_usage(acc: dict, usage: dict | None) -> None:
+    """Accumulate one response's token counts into `acc`."""
+    if not usage:
+        return
+    for f in USAGE_FIELDS:
+        acc[f] += int(usage.get(f, 0) or 0)
+
+
+def _usage_from_response(resp) -> dict | None:
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return None
+    return {
+        "input_tokens": getattr(u, "input_tokens", 0) or 0,
+        "output_tokens": getattr(u, "output_tokens", 0) or 0,
+        "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+        "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+    }
+
+
+def cost_usd(usage: dict, model: str) -> dict:
+    """Dollar cost of `usage` for `model`.
+
+    Returns {"usd": None, "status": "unverified-price", ...} when the model has
+    no verified price here, so an unpriced model is reported as unknown rather
+    than as $0.00.
+    """
+    rates = PRICING_USD_PER_MTOK.get(model)
+    if rates is None:
+        return {
+            "usd": None,
+            "status": "unverified-price",
+            "note": f"no verified price for model {model!r}; token counts only",
+            "model": model,
+        }
+    per_tok = {
+        "input": usage["input_tokens"] / 1_000_000 * rates["input"],
+        "output": usage["output_tokens"] / 1_000_000 * rates["output"],
+        # 5-minute write rate; see the known limit in the comment above.
+        "cache_write": usage["cache_creation_input_tokens"] / 1_000_000 * rates["cache_write_5m"],
+        "cache_read": usage["cache_read_input_tokens"] / 1_000_000 * rates["cache_read"],
+    }
+    return {
+        "usd": round(sum(per_tok.values()), 6),
+        "status": "priced",
+        "breakdown_usd": {k: round(v, 6) for k, v in per_tok.items()},
+        "model": model,
+        "cache_write_rate_assumed": "5m",
+        "price_source": PRICING_SOURCE_URL,
+        "price_verified": PRICING_VERIFIED_DATE,
+    }
+
 JUDGE_SYSTEM_PROMPT = """You are a strict grading judge for a RAG (retrieval-augmented generation) question-answering system.
 
 You will be given a question, a short reference answer (the ground truth), and the system's generated answer.
@@ -93,7 +187,7 @@ def load_dataset(limit: int | None, category: str | None = None):
     return data
 
 
-def judge_answer(client, question: str, expected_answer: str, generated_answer: str) -> tuple[str, str]:
+def judge_answer(client, question: str, expected_answer: str, generated_answer: str) -> tuple[str, str, dict | None]:
     user_msg = (
         f"Question: {question}\n"
         f"Reference answer: {expected_answer}\n"
@@ -107,6 +201,7 @@ def judge_answer(client, question: str, expected_answer: str, generated_answer: 
         system=JUDGE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_msg}],
     )
+    judge_usage = _usage_from_response(resp)
     raw = resp.content[0].text.strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
@@ -121,7 +216,7 @@ def judge_answer(client, question: str, expected_answer: str, generated_answer: 
         reason = f"judge output not parseable as JSON: {raw[:200]!r}"
     if verdict not in ("correct", "partially_correct", "incorrect"):
         verdict = "incorrect"
-    return verdict, reason
+    return verdict, reason, judge_usage
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -163,6 +258,14 @@ def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> 
     judge_client = None if no_judge else anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     api_calls = {"answer_calls": 0, "judge_calls": 0}
+    # Instrumentation accumulators (added 2026-10-03). `missing` counts calls
+    # that returned no usage object, so an empty total is never mistaken for a
+    # cheap run.
+    token_usage = {
+        "answer": _empty_usage(),
+        "judge": _empty_usage(),
+        "calls_without_usage": {"answer": 0, "judge": 0},
+    }
     results = []
 
     print(f"Running {len(dataset)} eval cases against top_k={max(K_VALUES)} retrieval "
@@ -181,6 +284,11 @@ def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> 
         )
         latency = time.perf_counter() - t0
         api_calls["answer_calls"] += 1
+        answer_usage = answer_result.get("usage")
+        if answer_usage:
+            _add_usage(token_usage["answer"], answer_usage)
+        else:
+            token_usage["calls_without_usage"]["answer"] += 1
 
         generated_answer = answer_result["answer"]
         retrieved_texts = [c["chunk_text"] for c in retrieved]
@@ -201,11 +309,16 @@ def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> 
 
         judge_verdict = None
         judge_reason = None
+        judge_usage = None
         if is_answerable and not no_judge:
-            judge_verdict, judge_reason = judge_answer(
+            judge_verdict, judge_reason, judge_usage = judge_answer(
                 judge_client, case["question"], case["expected_answer"], generated_answer
             )
             api_calls["judge_calls"] += 1
+            if judge_usage:
+                _add_usage(token_usage["judge"], judge_usage)
+            else:
+                token_usage["calls_without_usage"]["judge"] += 1
 
         refused = REFUSAL_PHRASE in generated_answer
         hallucinated = (not is_answerable) and (not refused)
@@ -237,6 +350,7 @@ def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> 
             "refused": refused,
             "hallucinated_on_unanswerable": hallucinated,
             "latency_sec": round(latency, 3),
+            "usage": {"answer": answer_usage, "judge": judge_usage},
         }
         results.append(result)
 
@@ -245,10 +359,72 @@ def run_eval(limit: int | None, no_judge: bool, category: str | None = None) -> 
               f"{latency:5.2f}s  {verdict_str}")
 
     metrics = compute_metrics(results, no_judge)
+    cost = build_cost_report(
+        token_usage,
+        api_calls,
+        answer_model=claude_qa.MODEL,
+        judge_model=None if no_judge else JUDGE_MODEL,
+        n_cases=len(results),
+    )
     return {
         "results": results,
         "metrics": metrics,
         "api_calls": api_calls,
+        "token_usage": token_usage,
+        "cost": cost,
+    }
+
+
+def build_cost_report(token_usage: dict, api_calls: dict, answer_model: str,
+                      judge_model: str | None, n_cases: int) -> dict:
+    """Totals, per-question cost, and the data needed to project a longer run.
+
+    Measurement only -- nothing here feeds back into grading.
+    """
+    answer_cost = cost_usd(token_usage["answer"], answer_model)
+    judge_cost = (
+        cost_usd(token_usage["judge"], judge_model)
+        if judge_model
+        else {"usd": 0.0, "status": "not-run", "model": None}
+    )
+
+    parts = [answer_cost, judge_cost]
+    unpriced = [p for p in parts if p.get("status") == "unverified-price"]
+    if unpriced:
+        run_usd = None
+        status = "unverified-price"
+    else:
+        run_usd = round(sum(p["usd"] for p in parts), 6)
+        status = "priced"
+
+    totals = _empty_usage()
+    _add_usage(totals, token_usage["answer"])
+    _add_usage(totals, token_usage["judge"])
+
+    missing = token_usage["calls_without_usage"]
+    n_missing = missing["answer"] + missing["judge"]
+    n_calls = api_calls["answer_calls"] + api_calls["judge_calls"]
+    # An empty measurement is not a cheap run. If no call reported usage, the
+    # dollar figure is unknown, not $0.00; if only some did, the total is a
+    # floor and is labelled as such.
+    if n_calls and n_missing == n_calls:
+        run_usd = None
+        status = "no-usage-reported"
+    elif n_missing:
+        status = "incomplete-usage"
+
+    return {
+        "status": status,
+        "price_source": PRICING_SOURCE_URL,
+        "price_verified": PRICING_VERIFIED_DATE,
+        "tokens_total": totals,
+        "tokens_by_stage": {"answer": token_usage["answer"], "judge": token_usage["judge"]},
+        "calls_without_usage": missing,
+        "usd_by_stage": {"answer": answer_cost, "judge": judge_cost},
+        "usd_run_total": run_usd,
+        "usd_per_question": (round(run_usd / n_cases, 6) if (run_usd is not None and n_cases) else None),
+        "n_cases": n_cases,
+        "api_calls": dict(api_calls),
     }
 
 
@@ -378,6 +554,37 @@ def print_summary(metrics: dict, api_calls: dict, no_judge: bool) -> None:
     print("=" * 72)
 
 
+def print_cost(cost: dict) -> None:
+    t = cost["tokens_total"]
+    print("\n" + "=" * 72)
+    print("TOKENS AND COST")
+    print("=" * 72)
+    print(f"  price source: {cost['price_source']}  (verified {cost['price_verified']})")
+    for stage in ("answer", "judge"):
+        s = cost["tokens_by_stage"][stage]
+        c = cost["usd_by_stage"][stage]
+        usd = "unverified" if c.get("usd") is None else f"${c['usd']:.6f}"
+        print(f"  {stage:7s} in={s['input_tokens']:>8d}  out={s['output_tokens']:>7d}  "
+              f"cache_w={s['cache_creation_input_tokens']:>7d}  cache_r={s['cache_read_input_tokens']:>7d}  "
+              f"{usd}  [{c.get('model')}]")
+    print(f"  total   in={t['input_tokens']:>8d}  out={t['output_tokens']:>7d}  "
+          f"cache_w={t['cache_creation_input_tokens']:>7d}  cache_r={t['cache_read_input_tokens']:>7d}")
+    miss = cost["calls_without_usage"]
+    print(f"  calls that returned no usage object: answer={miss['answer']}, judge={miss['judge']}")
+    if cost["usd_run_total"] is None:
+        reason = ("no call reported a usage object"
+                  if cost["status"] == "no-usage-reported"
+                  else "no verified price for one of the models")
+        print(f"  RUN TOTAL: unknown ({reason}) -- not $0.00")
+    else:
+        label = "floor, some calls reported no usage" if cost["status"] == "incomplete-usage" else "measured"
+        print(f"  RUN TOTAL: ${cost['usd_run_total']:.6f}   "
+              f"per question (n={cost['n_cases']}): ${cost['usd_per_question']:.6f}   [{label}]")
+    if t["cache_creation_input_tokens"] or t["cache_read_input_tokens"]:
+        print("  NOTE: cache tokens are non-zero; cache writes are costed at the 5-minute rate.")
+    print("=" * 72)
+
+
 def fmt_pct(v) -> str:
     return "n/a" if v is None else f"{v:.1f}%"
 
@@ -426,6 +633,22 @@ def write_markdown(path: Path, run_data: dict, timestamp: str) -> None:
               f"- answer calls: {run_data['api_calls']['answer_calls']}",
               f"- judge calls: {run_data['api_calls']['judge_calls']}", ""]
 
+    cost = run_data.get("cost")
+    if cost:
+        t = cost["tokens_total"]
+        run_usd = "unverified" if cost["usd_run_total"] is None else f"${cost['usd_run_total']:.6f}"
+        per_q = "unverified" if cost["usd_per_question"] is None else f"${cost['usd_per_question']:.6f}"
+        lines += ["## Tokens and cost", "",
+                  f"- price source: {cost['price_source']} (verified {cost['price_verified']})",
+                  f"- input tokens: {t['input_tokens']}",
+                  f"- output tokens: {t['output_tokens']}",
+                  f"- cache write tokens: {t['cache_creation_input_tokens']}",
+                  f"- cache read tokens: {t['cache_read_input_tokens']}",
+                  f"- calls without a usage object: answer "
+                  f"{cost['calls_without_usage']['answer']}, judge {cost['calls_without_usage']['judge']}",
+                  f"- run total: {run_usd}",
+                  f"- per question (n={cost['n_cases']}): {per_q}", ""]
+
     lines += ["## Failing cases (incorrect or hallucinated)", ""]
     for res in run_data["results"]:
         if res["judge_verdict"] == "incorrect" or res["hallucinated_on_unanswerable"]:
@@ -446,6 +669,7 @@ def main():
 
     run_data = run_eval(limit=args.limit, no_judge=args.no_judge, category=args.category)
     print_summary(run_data["metrics"], run_data["api_calls"], args.no_judge)
+    print_cost(run_data["cost"])
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -467,6 +691,8 @@ def main():
             "category": args.category,
         },
         "api_calls": run_data["api_calls"],
+        "token_usage": run_data["token_usage"],
+        "cost": run_data["cost"],
         "metrics": run_data["metrics"],
         "results": run_data["results"],
     }

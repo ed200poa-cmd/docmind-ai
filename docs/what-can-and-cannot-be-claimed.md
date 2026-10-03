@@ -3,7 +3,7 @@
 A boundary list, not an argument. `evals/RESULTS.md` carries the per-change
 analysis. This page is for the five minutes before someone asks about a number.
 
-Every figure below names the run it came from. All five runs are tracked in
+Every figure below names the run it came from. All seven runs are tracked in
 `evals/results/`, with their SHA-256 in `evals/results/README.md`.
 
 | run | date | what it is |
@@ -13,6 +13,8 @@ Every figure below names the run it came from. All five runs are tracked in
 | `eval_20260730T122037Z` | 2026-07-30 | confirmation run 1 |
 | `eval_20260730T122154Z` | 2026-07-30 | confirmation run 2 |
 | `eval_20260803T022554Z` | 2026-08-03 | after the chunker fix; source of the published quality figures |
+| `eval_20261003T142527Z` | 2026-10-03 | re-measurement run 1, no code change to retrieval or answering |
+| `eval_20261003T142910Z` | 2026-10-03 | re-measurement run 2 |
 
 ---
 
@@ -27,6 +29,32 @@ category, factual (n=15) 100.0% at every k, multi_chunk (n=8) 62.5% / 87.5% /
 `eval_20260803T022554Z`, n=23: 91.3% correct, 8.7% partially_correct, 0.0%
 incorrect. factual (n=15) 100.0%, multi_chunk (n=8) 75.0%. The two
 `partially_correct` cases are `multi_chunk_03` and `multi_chunk_07`.
+
+**That answer correctness is a range, not a point.** Across the six tracked runs
+after the baseline, meaning `eval_20260730T014202Z`, `eval_20260730T122037Z`,
+`eval_20260730T122154Z`, `eval_20260803T022554Z`, `eval_20261003T142527Z` and
+`eval_20261003T142910Z`, `correct` reads 91.3% or 95.7% and nothing else, and
+`incorrect` is 0.0% in all six. Four of those six read 91.3%, which is the
+figure published from `eval_20260803T022554Z`; the two 2026-10-03 runs read
+95.7%. Those two re-ran the same 30 cases with no change to retrieval,
+chunking, the index, the prompts or the judge. The baseline
+`eval_20260720T124830Z` sits outside this range and is stated separately: 87.0%
+correct, 8.7% `partially_correct`, 4.3% `incorrect`.
+
+**What moved inside that range.** One case of 23. `multi_chunk_03` reads
+`partially_correct` in `eval_20260803T022554Z` and `correct` in both
+2026-10-03 runs, while `multi_chunk_07` reads `partially_correct` in all three.
+Retrieval was identical in 30 of 30 cases across those three runs, so the index
+is not the cause. The generated answer for `multi_chunk_03` changed, and it
+changed in the one respect the August judge named, the missing `$500` annual
+limit. Both 2026-10-03 files were checked before being tracked on the standard
+in `evals/results/README.md`: the full credential and personal-data pattern set
+with no match, `gitleaks 8.30.1` with this repository's `.gitleaks.toml`
+reporting `no leaks found` over the full byte length of each, and provenance
+confirmed over 150 `chunk_text` and 30 `question` values per file.
+`docs/reports/hillclimb-2026-10-03.md` carries the full comparison. The two
+2026-10-03 figures are not re-derived by the tests in
+`tests/test_claims_doc.py`, whose run constants name the first five runs only.
 
 **Verdict-level reproducibility.** Runs `eval_20260730T122037Z` and
 `eval_20260730T122154Z`, executed back to back with no code change between them,
